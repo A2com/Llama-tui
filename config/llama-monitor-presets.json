@@ -1,0 +1,38 @@
+[
+  {
+    "name": "Qwen3.5-35B UD Q6_K (no MTP)",
+    "model_path": "models/Qwen3.6-35B-A3B-UD-Q6_K_XL.gguf",
+    "context_size": 131072,
+    "ctk": "q4_0",
+    "ctv": "q4_0",
+    "tensor_split": "",
+    "batch_size": 2048,
+    "ubatch_size": 2048,
+    "no_mmap": false,
+    "ngram_spec": false,
+    "parallel_slots": 1,
+    "gpu_layers": 99,
+    "mlock": false,
+    "flash_attn": "1",
+    "threads": 12,
+    "extra_args": "--cont-batching"
+  },
+  {
+    "name": "Qwen3.5-35B MTP UD Q6_K",
+    "model_path": "models/Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf",
+    "context_size": 131072,
+    "ctk": "q4_0",
+    "ctv": "q4_0",
+    "tensor_split": "",
+    "batch_size": 2048,
+    "ubatch_size": 2048,
+    "no_mmap": false,
+    "ngram_spec": false,
+    "parallel_slots": 1,
+    "gpu_layers": 99,
+    "mlock": false,
+    "flash_attn": "1",
+    "threads": 12,
+    "extra_args": "--cont-batching"
+  }
+]

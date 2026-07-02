@@ -1,0 +1,18 @@
+model_list:
+  - model_name: "*"
+    litellm_params:
+      model: openai/qwen3
+      api_base: http://127.0.0.1:8082/v1
+      api_key: fake
+      extra_body:
+        chat_template_kwargs:
+          enable_thinking: false
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600
+
+general_settings:
+  disable_spend_logs: true
+  disable_reset_budget: true
+  store_model_in_db: false

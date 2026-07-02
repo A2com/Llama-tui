@@ -1,0 +1,129 @@
+import re
+from pathlib import Path
+
+import pytest
+from datetime import datetime, timedelta
+from src.tui_model import StatusModel, LogBuffer, ServerStatus
+
+
+PROJECT_ROOT = Path(__file__).parent.parent
+
+
+def test_status_model_initial_state():
+    model = StatusModel()
+    assert model.status == ServerStatus.STOPPED
+    assert model.pid is None
+    assert model.uptime_seconds == 0
+
+
+def test_status_model_update_to_running():
+    model = StatusModel()
+    model.update(status=ServerStatus.RUNNING, pid=1234)
+    assert model.status == ServerStatus.RUNNING
+    assert model.pid == 1234
+
+
+def test_status_model_update_to_stopped():
+    model = StatusModel()
+    model.update(status=ServerStatus.RUNNING, pid=1234)
+    model.update(status=ServerStatus.STOPPED, pid=None)
+    assert model.status == ServerStatus.STOPPED
+    assert model.pid is None
+
+
+def test_status_model_formats_uptime_seconds():
+    model = StatusModel()
+    model.update(status=ServerStatus.RUNNING, pid=1, uptime_seconds=45)
+    assert model.uptime_str == "0h 00m 45s"
+
+
+def test_status_model_formats_uptime_minutes():
+    model = StatusModel()
+    model.update(status=ServerStatus.RUNNING, pid=1, uptime_seconds=3725)
+    assert model.uptime_str == "1h 02m 05s"
+
+
+def test_status_model_uptime_zero_when_stopped():
+    model = StatusModel()
+    assert model.uptime_str == "--"
+
+
+def test_status_model_is_running_property():
+    model = StatusModel()
+    assert model.is_running is False
+    model.update(status=ServerStatus.RUNNING, pid=1)
+    assert model.is_running is True
+
+
+def test_log_buffer_starts_empty():
+    buf = LogBuffer(max_lines=100)
+    assert len(buf.lines) == 0
+
+
+def test_log_buffer_adds_line():
+    buf = LogBuffer(max_lines=100)
+    buf.add("hello world")
+    assert len(buf.lines) == 1
+    assert buf.lines[0] == "hello world"
+
+
+def test_log_buffer_respects_max_lines():
+    buf = LogBuffer(max_lines=5)
+    for i in range(10):
+        buf.add(f"line {i}")
+    assert len(buf.lines) == 5
+    assert buf.lines[-1] == "line 9"
+
+
+def test_log_buffer_drops_oldest_lines():
+    buf = LogBuffer(max_lines=3)
+    buf.add("first")
+    buf.add("second")
+    buf.add("third")
+    buf.add("fourth")
+    assert buf.lines[0] == "second"
+
+
+def test_log_buffer_clear():
+    buf = LogBuffer(max_lines=100)
+    buf.add("a")
+    buf.add("b")
+    buf.clear()
+    assert len(buf.lines) == 0
+
+
+def test_tui_source_no_fast_proxy_label():
+    """Le TUI ne doit plus mentionner 'fast proxy' — remplace par litellm."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    matches = re.findall(r"fast proxy", tui_src, re.IGNORECASE)
+    assert matches == [], f"found 'fast proxy' in tui.py: {matches}"
+
+
+def test_tui_theme_is_dark():
+    """Le TUI doit utiliser un thème sombre, pas monokai flashy."""
+    from src.tui import LlamaTUI
+    app = LlamaTUI()
+    assert app.theme in ("textual-dark", "css"), f"theme actuel : {app.theme}"
+
+
+def test_tui_has_llama_monitor_action():
+    """Le TUI doit exposer une action pour lancer llama-monitor."""
+    from src.tui import LlamaTUI
+    assert hasattr(LlamaTUI, "action_start_llama_monitor")
+
+
+def test_tui_has_llama_monitor_binding():
+    """Le TUI doit avoir un binding clavier pour llama-monitor."""
+    from src.tui import LlamaTUI
+    bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
+    assert "m" in bindings
+    assert bindings["m"] == "start_llama_monitor"
+
+
+def test_llama_monitor_cmd_includes_models_dir():
+    """La commande llama-monitor doit passer --models-dir pour la découverte des modèles."""
+    from src.tui import LlamaTUI, MODELS_DIR
+    app = LlamaTUI()
+    cmd = app._build_llama_monitor_cmd("llama-server")
+    assert "--models-dir" in cmd
+    assert str(MODELS_DIR) in cmd
