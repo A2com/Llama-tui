@@ -187,16 +187,15 @@ def test_download_raises_if_local_filename_already_exists(manager, models_dir):
 
 # ── Sidecar config ────────────────────────────────────────────────────────────
 
-def test_load_applies_sidecar_overrides_when_present(manager, models_dir, config_file):
-    (models_dir / "beta.json").write_text(json.dumps({"spec_type": "draft-mtp", "spec_draft_n_max": 2}))
-    manager.load(models_dir / "beta.gguf")
+def test_load_applies_mtp_when_model_filename_contains_mtp(manager, models_dir, config_file):
+    (models_dir / "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf").write_bytes(b"x" * 1024)
+    manager.load(models_dir / "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf")
     saved = json.loads(config_file.read_text())
     assert saved["spec_type"] == "draft-mtp"
     assert saved["spec_draft_n_max"] == 2
 
 
-def test_load_clears_mtp_fields_when_no_sidecar(manager, models_dir, config_file):
-    # Pre-set MTP fields in config
+def test_load_clears_mtp_fields_for_non_mtp_model(manager, models_dir, config_file):
     cfg = json.loads(config_file.read_text())
     cfg["spec_type"] = "draft-mtp"
     cfg["spec_draft_n_max"] = 2
@@ -208,11 +207,11 @@ def test_load_clears_mtp_fields_when_no_sidecar(manager, models_dir, config_file
     assert "spec_draft_n_max" not in saved
 
 
-def test_load_replaces_sidecar_when_switching_models(manager, models_dir, config_file):
-    (models_dir / "beta.json").write_text(json.dumps({"spec_type": "draft-mtp", "spec_draft_n_max": 2}))
-    manager.load(models_dir / "beta.gguf")
+def test_load_replaces_mtp_when_switching_to_non_mtp(manager, models_dir, config_file):
+    (models_dir / "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf").write_bytes(b"x" * 1024)
+    manager.load(models_dir / "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf")
 
-    # Switch to alpha (no sidecar) — MTP fields must disappear
+    # Switch to alpha (non-MTP) — MTP fields must disappear
     manager.load(models_dir / "alpha.gguf")
     saved = json.loads(config_file.read_text())
     assert "spec_type" not in saved

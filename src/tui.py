@@ -28,17 +28,22 @@ LLAMA_MONITOR_PORT = int(os.environ.get("LLAMA_TUI_MONITOR_PORT", 7778))
 LLAMA_MONITOR_PRESETS = Path(os.environ.get("LLAMA_TUI_MONITOR_PRESETS", PROJECT_ROOT / "config" / "llama-monitor-presets.json"))
 
 
+DEFAULT_MODEL = "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf"
+
+
 def _ensure_config() -> None:
-    """Crée config/server.json par défaut s'il manque (chemins relatifs)."""
+    """Crée config/server.json par défaut s'il manque, avec modèle MTP par défaut."""
     if CONFIG_FILE.exists():
         return
     CONFIG_FILE.parent.mkdir(parents=True, exist_ok=True)
+    CONFIG_PATH = MODELS_DIR / DEFAULT_MODEL
+    default_model = f"models/{DEFAULT_MODEL}" if CONFIG_PATH.exists() else "models/default.gguf"
     CONFIG_FILE.write_text(json.dumps({
-        "model": "models/default.gguf",
+        "model": default_model,
         "host": "0.0.0.0",
         "port": 8082,
         "n_gpu_layers": 99,
-        "ctx_size": 131072,
+        "ctx_size": 32768,
         "batch_size": 2048,
         "ubatch_size": 2048,
         "threads": 12,
@@ -48,6 +53,8 @@ def _ensure_config() -> None:
         "cache_type_k": "q4_0",
         "cache_type_v": "q4_0",
         "jinja": True,
+        "spec_type": "draft-mtp",
+        "spec_draft_n_max": 2,
     }, indent=2))
 
 
