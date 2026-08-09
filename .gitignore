@@ -1,16 +1,8 @@
-__pycache__/
-*.py[cod]
-*.so
-*.egg-info/
-.pytest_cache/
-.mypy_cache/
-.ruff_cache/
-.venv/
-venv/
-env/
-.env
-.DS_Store
-*.pid
+# Playwright / runtime artifacts
+.playwright-mcp/
 logs/
-models/
-config/server.json
+*.pid
+*.log
+__pycache__/
+.pytest_cache/
+*.pyc
