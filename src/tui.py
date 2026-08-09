@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -29,6 +30,12 @@ LLAMA_MONITOR_PRESETS = Path(os.environ.get("LLAMA_TUI_MONITOR_PRESETS", PROJECT
 
 
 DEFAULT_MODEL = "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf"
+
+
+def _port_open(port: int, host: str = "127.0.0.1") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex((host, port)) == 0
 
 
 def _ensure_config() -> None:
@@ -93,6 +100,7 @@ class HelpScreen(ModalScreen):
             ("c", "Vide les logs"),
             ("d", "Ouvre Llama WebUI"),
             ("m", "Démarre llama-monitor"),
+            ("n", "Télécharge un modèle (HF)"),
             ("/", "Filtre les modèles par nom"),
             ("Tab", "Focus liste modèles"),
             ("?", "Affiche cette aide"),
@@ -105,6 +113,47 @@ class HelpScreen(ModalScreen):
                 yield Static(f"[bold yellow]{key:<8}[/bold yellow] [dim]{desc}[/dim]")
             yield Static("─" * 40, classes="divider")
             yield Static("[dim]Esc / ? / q pour fermer[/dim]")
+
+
+class DownloadScreen(ModalScreen):
+    """Overlay de téléchargement de modèle depuis HuggingFace."""
+
+    BINDINGS = [Binding("escape", "dismiss", "Fermer", show=True)]
+
+    CSS = """
+    DownloadScreen { align: center middle; }
+    #download-card {
+        width: 72; max-height: 80%;
+        border: solid $primary; background: $surface; padding: 1 2;
+    }
+    #download-card .title { color: $primary; text-style: bold; }
+    #download-card .field   { color: $text-muted; margin-top: 1; }
+    #download-card Input { margin: 0 0 1 0; border: solid $surface-lighten-1; }
+    #download-card Input:focus { border: solid $primary; }
+    #dl-submit { width: 20; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="download-card"):
+            yield Static("▪ Télécharger un modèle", classes="title")
+            yield Static("─" * 40, classes="divider")
+            yield Static("repo_id  (ex: Qwen/Qwen3-0.6B-GGUF)", classes="field")
+            yield Input(placeholder="user/repo", id="dl-repo")
+            yield Static("filename  (ex: qwen3-0.6b-q8_0.gguf)", classes="field")
+            yield Input(placeholder="fichier.gguf", id="dl-filename")
+            yield Static("local_filename  (optionnel)", classes="field")
+            yield Input(placeholder="(= filename par défaut)", id="dl-local")
+            yield Button("⬇ Télécharger", id="dl-submit", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id != "dl-submit":
+            return
+        repo = self.query_one("#dl-repo", Input).value.strip()
+        fn = self.query_one("#dl-filename", Input).value.strip()
+        local = self.query_one("#dl-local", Input).value.strip() or None
+        if not repo or not fn:
+            return
+        self.dismiss((repo, fn, local))
 
 
 class LlamaTUI(App):
@@ -231,6 +280,7 @@ class LlamaTUI(App):
         Binding("c",      "clear_logs",     "Vider logs"),
         Binding("d",      "open_activity",  "Llama WebUI"),
         Binding("m",      "start_llama_monitor", "Monitor"),
+        Binding("n",      "download_model", "Télécharger"),
         Binding("?",      "help",           "Aide", show=True),
         Binding("slash",  "focus_filter",   "Filtre", show=True),
         Binding("tab",    "focus_models",   "Focus modèles", show=False),
@@ -280,6 +330,10 @@ class LlamaTUI(App):
                 yield Label("", id="lbl-proxy-pid")
                 yield Label("", id="lbl-proxy-port")
                 yield Label("", id="lbl-proxy-health")
+                yield Static(" ", classes="divider")
+                yield Static("▪ llama-monitor", classes="section")
+                yield Static("─" * 26, classes="divider")
+                yield Label("", id="lbl-monitor-status")
             with Vertical(id="right-panel"):
                 with Vertical(id="stats-panel"):
                     yield Static("▪ Performance", classes="section")
@@ -377,6 +431,7 @@ class LlamaTUI(App):
         self._refresh_status_bar()
         self._refresh_server()
         self._refresh_proxy()
+        self._refresh_monitor()
         self._refresh_stats()
 
     def _refresh_status_bar(self) -> None:
@@ -444,6 +499,13 @@ class LlamaTUI(App):
 
         self.query_one("#btn-proxy-start", Button).disabled = is_running
         self.query_one("#btn-proxy-stop",  Button).disabled = not is_running
+
+    def _refresh_monitor(self) -> None:
+        up = _port_open(LLAMA_MONITOR_PORT)
+        cls = "running" if up else "stopped"
+        sym = "●" if up else "○"
+        self.query_one("#lbl-monitor-status", Label).update(
+            f"[bold]Monitor:[/bold] [{cls}]{sym} :{LLAMA_MONITOR_PORT}[/{cls}]")
 
     def _refresh_stats(self) -> None:
         s = self._stats.last_stats
@@ -597,6 +659,27 @@ class LlamaTUI(App):
             self._log(f"[{self._ts()}] ▶ llama-monitor lancé → http://localhost:{LLAMA_MONITOR_PORT}")
         except Exception as e:
             self._log(f"[{self._ts()}] ✗ Erreur llama-monitor: {e}")
+
+    def action_download_model(self) -> None:
+        self.push_screen(DownloadScreen(), self._on_download_result)
+
+    def _on_download_result(self, result) -> None:
+        if result is None:
+            return
+        repo, fn, local = result
+        threading.Thread(
+            target=self._do_download, args=(repo, fn, local), daemon=True
+        ).start()
+
+    def _do_download(self, repo: str, fn: str, local: str | None) -> None:
+        self.call_from_thread(self._log, f"[{self._ts()}] ⬇ Téléchargement {repo}/{fn}")
+        try:
+            info = self._model_mgr.download(repo, fn, local)
+            self.call_from_thread(
+                self._log, f"[{self._ts()}] ✓ {info.name} téléchargé ({info.size_gb:.1f}GB)")
+            self.call_from_thread(self._populate_model_list)
+        except Exception as e:
+            self.call_from_thread(self._log, f"[{self._ts()}] ✗ Download: {e}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {

@@ -127,3 +127,28 @@ def test_llama_monitor_cmd_includes_models_dir():
     cmd = app._build_llama_monitor_cmd("llama-server")
     assert "--models-dir" in cmd
     assert str(MODELS_DIR) in cmd
+
+
+def test_tui_has_monitor_status_label():
+    """Sidebar doit afficher un label de statut llama-monitor (port 7778)."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "lbl-monitor-status" in tui_src, "lbl-monitor-status manquant"
+
+
+def test_tui_has_download_screen():
+    """DownloadScreen (ModalScreen) doit exister pour télécharger des modèles."""
+    from textual.screen import ModalScreen
+    from src.tui import DownloadScreen
+    assert issubclass(DownloadScreen, ModalScreen), "DownloadScreen n'est pas un ModalScreen"
+
+
+def test_tui_has_download_binding():
+    """Touche n → action download_model."""
+    from src.tui import LlamaTUI
+    bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
+    assert bindings.get("n") == "download_model"
+
+
+def test_tui_has_download_action():
+    from src.tui import LlamaTUI
+    assert hasattr(LlamaTUI, "action_download_model")
