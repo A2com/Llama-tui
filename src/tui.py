@@ -2,6 +2,7 @@
 
 import json
 import os
+import socket
 import subprocess
 import threading
 import time
@@ -11,7 +12,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input, TabbedContent, TabPane
 
 from src.model_manager import ModelManager
 from src.proxy_manager import ProxyManager, ProxyStatus
@@ -31,6 +32,12 @@ LLAMA_MONITOR_PRESETS = Path(os.environ.get("LLAMA_TUI_MONITOR_PRESETS", PROJECT
 DEFAULT_MODEL = "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf"
 
 
+def _port_open(port: int, host: str = "127.0.0.1") -> bool:
+    with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as s:
+        s.settimeout(0.3)
+        return s.connect_ex((host, port)) == 0
+
+
 def _ensure_config() -> None:
     """Crée config/server.json par défaut s'il manque, avec modèle MTP par défaut."""
     if CONFIG_FILE.exists():
@@ -43,7 +50,7 @@ def _ensure_config() -> None:
         "host": "0.0.0.0",
         "port": 8082,
         "n_gpu_layers": 99,
-        "ctx_size": 32768,
+        "ctx_size": 131072,
         "batch_size": 2048,
         "ubatch_size": 2048,
         "threads": 12,
@@ -55,6 +62,7 @@ def _ensure_config() -> None:
         "jinja": True,
         "spec_type": "draft-mtp",
         "spec_draft_n_max": 2,
+        "proxy_backend": "bun",
     }, indent=2))
 
 
@@ -93,6 +101,8 @@ class HelpScreen(ModalScreen):
             ("c", "Vide les logs"),
             ("d", "Ouvre Llama WebUI"),
             ("m", "Démarre llama-monitor"),
+            ("n", "Télécharge un modèle (HF)"),
+            ("b", "Bascule backend proxy (bun↔litellm)"),
             ("/", "Filtre les modèles par nom"),
             ("Tab", "Focus liste modèles"),
             ("?", "Affiche cette aide"),
@@ -107,6 +117,47 @@ class HelpScreen(ModalScreen):
             yield Static("[dim]Esc / ? / q pour fermer[/dim]")
 
 
+class DownloadScreen(ModalScreen):
+    """Overlay de téléchargement de modèle depuis HuggingFace."""
+
+    BINDINGS = [Binding("escape", "dismiss", "Fermer", show=True)]
+
+    CSS = """
+    DownloadScreen { align: center middle; }
+    #download-card {
+        width: 72; max-height: 80%;
+        border: solid $primary; background: $surface; padding: 1 2;
+    }
+    #download-card .title { color: $primary; text-style: bold; }
+    #download-card .field   { color: $text-muted; margin-top: 1; }
+    #download-card Input { margin: 0 0 1 0; border: solid $surface-lighten-1; }
+    #download-card Input:focus { border: solid $primary; }
+    #dl-submit { width: 20; }
+    """
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="download-card"):
+            yield Static("▪ Télécharger un modèle", classes="title")
+            yield Static("─" * 40, classes="divider")
+            yield Static("repo_id  (ex: Qwen/Qwen3-0.6B-GGUF)", classes="field")
+            yield Input(placeholder="user/repo", id="dl-repo")
+            yield Static("filename  (ex: qwen3-0.6b-q8_0.gguf)", classes="field")
+            yield Input(placeholder="fichier.gguf", id="dl-filename")
+            yield Static("local_filename  (optionnel)", classes="field")
+            yield Input(placeholder="(= filename par défaut)", id="dl-local")
+            yield Button("⬇ Télécharger", id="dl-submit", variant="primary")
+
+    def on_button_pressed(self, event: Button.Pressed) -> None:
+        if event.button.id != "dl-submit":
+            return
+        repo = self.query_one("#dl-repo", Input).value.strip()
+        fn = self.query_one("#dl-filename", Input).value.strip()
+        local = self.query_one("#dl-local", Input).value.strip() or None
+        if not repo or not fn:
+            return
+        self.dismiss((repo, fn, local))
+
+
 class LlamaTUI(App):
     CSS = """
     Screen { layout: vertical; }
@@ -114,8 +165,8 @@ class LlamaTUI(App):
     /* ── Barre de statut globale ── */
     #status-bar {
         height: 1;
-        background: $surface-darken-2;
-        color: $text;
+        background: #1e1f1c;
+        color: #f8f8f2;
         padding: 0 1;
         text-style: bold;
     }
@@ -177,23 +228,23 @@ class LlamaTUI(App):
         margin: 0 1;
         width: 18;
         height: 3;
-        background: #2f3c42;
-        color: #d0d8dc;
+        background: #272822;
+        color: #f8f8f2;
     }
-    Button:hover { background: #3a4a52; color: #ffffff; }
-    Button:disabled { background: #1a2226; color: #5a6a70; }
-    .Button--success   { color: #7ec883; }
-    .Button--success:hover   { color: #a0e8a3; }
-    .Button--success:disabled { color: #3a4a3a; }
-    .Button--error     { color: #e06c75; }
-    .Button--error:hover     { color: #ff8a91; }
-    .Button--error:disabled  { color: #4a2a2e; }
-    .Button--warning   { color: #e5c07b; }
-    .Button--warning:hover   { color: #ffe08a; }
-    .Button--warning:disabled { color: #4a3e2e; }
-    .Button--primary   { color: #61afef; }
-    .Button--primary:hover   { color: #8ac4ff; }
-    .Button--primary:disabled { color: #2e3a4a; }
+    Button:hover { background: #3e3d32; color: #ffffff; }
+    Button:disabled { background: #1e1f1c; color: #75715a; }
+    .Button--success   { color: #a6e22e; }
+    .Button--success:hover   { color: #c8f54a; }
+    .Button--success:disabled { color: #4a5a1e; }
+    .Button--error     { color: #f92672; }
+    .Button--error:hover     { color: #ff5c8f; }
+    .Button--error:disabled  { color: #5a1e3a; }
+    .Button--warning   { color: #fd971f; }
+    .Button--warning:hover   { color: #ffb84d; }
+    .Button--warning:disabled { color: #5a3e1e; }
+    .Button--primary   { color: #66d9ef; }
+    .Button--primary:hover   { color: #8ce8f5; }
+    .Button--primary:disabled { color: #2e5a6a; }
 
     .running  { color: $success; }
     .stopped  { color: $error; }
@@ -201,22 +252,27 @@ class LlamaTUI(App):
     .divider  { color: $surface-lighten-1; }
     .hint     { color: $text-muted; text-style: italic; }
 
-    /* ── Panneau droit (stats + log) ── */
-    #right-panel { height: 1fr; }
+    /* ── Panneau droit (onglets Stats/Slots/Logs) ── */
+    #right-tabs { height: 1fr; }
 
     /* ── Stats enrichies ── */
     #stats-panel {
         border: solid $surface-lighten-1;
-        height: 7;
+        height: auto;
         padding: 0 1;
     }
     #stats-grid { height: auto; }
     #stats-grid Label { margin-bottom: 0; }
-    #lbl-tps { color: $warning; text-style: bold; }
-    #lbl-tps-secondary { color: $text-muted; }
+    #lbl-tps { color: #fd971f; text-style: bold; }
+    #lbl-tps-secondary { color: #75715a; }
     #sparkline-tps { height: 2; }
-    #sparkline-tps > .sparkline--max-color { color: $warning; }
-    #sparkline-tps > .sparkline--min-color { color: $warning-darken-3; }
+    #sparkline-tps > .sparkline--max-color { color: #fd971f; }
+    #sparkline-tps > .sparkline--min-color { color: #75715a; }
+    #sparkline-cache { height: 2; }
+    #sparkline-cache > .sparkline--max-color { color: #a6e22e; }
+    #sparkline-cache > .sparkline--min-color { color: #75715a; }
+    #tab-slots { padding: 0 1; }
+    #lbl-slots { color: #f8f8f2; }
     """
 
     BINDINGS = [
@@ -231,6 +287,8 @@ class LlamaTUI(App):
         Binding("c",      "clear_logs",     "Vider logs"),
         Binding("d",      "open_activity",  "Llama WebUI"),
         Binding("m",      "start_llama_monitor", "Monitor"),
+        Binding("n",      "download_model", "Télécharger"),
+        Binding("b",      "switch_proxy_backend", "Proxy backend"),
         Binding("?",      "help",           "Aide", show=True),
         Binding("slash",  "focus_filter",   "Filtre", show=True),
         Binding("tab",    "focus_models",   "Focus modèles", show=False),
@@ -242,7 +300,15 @@ class LlamaTUI(App):
         self.theme = "textual-dark"
         _ensure_config()
         self._manager       = ServerManager(CONFIG_FILE)
-        self._proxy         = ProxyManager(PROXY_ROOT, port=8001)
+        try:
+            self._proxy_backend = json.loads(CONFIG_FILE.read_text()).get("proxy_backend", "bun")
+        except Exception:
+            self._proxy_backend = "bun"
+        self._proxy         = ProxyManager(
+            PROXY_ROOT, port=8001,
+            backend=self._proxy_backend,
+            server_port=self._manager._config.port,
+        )
         self._model_mgr     = ModelManager(models_dir=MODELS_DIR, config_file=CONFIG_FILE)
         self._status_model  = StatusModel()
         self._logs          = LogBuffer(max_lines=500)
@@ -280,13 +346,25 @@ class LlamaTUI(App):
                 yield Label("", id="lbl-proxy-pid")
                 yield Label("", id="lbl-proxy-port")
                 yield Label("", id="lbl-proxy-health")
-            with Vertical(id="right-panel"):
-                with Vertical(id="stats-panel"):
-                    yield Static("▪ Performance", classes="section")
-                    yield Label("", id="lbl-tps-secondary")
-                    yield Label("— t/s", id="lbl-tps")
-                    yield Sparkline([], id="sparkline-tps", summary_function=max)
-                yield Log(id="log-panel", highlight=True)
+                yield Label("", id="lbl-proxy-backend")
+                yield Static(" ", classes="divider")
+                yield Static("▪ llama-monitor", classes="section")
+                yield Static("─" * 26, classes="divider")
+                yield Label("", id="lbl-monitor-status")
+            with TabbedContent(id="right-tabs"):
+                with TabPane("Stats", id="tab-stats"):
+                    with Vertical(id="stats-panel"):
+                        yield Static("▪ Performance", classes="section")
+                        yield Label("", id="lbl-tps-secondary")
+                        yield Label("— t/s", id="lbl-tps")
+                        yield Sparkline([], id="sparkline-tps", summary_function=max)
+                        yield Sparkline([], id="sparkline-cache", summary_function=max)
+                with TabPane("Slots", id="tab-slots"):
+                    yield Static("▪ Slots", classes="section")
+                    yield Static("─" * 40, classes="divider")
+                    yield Label("", id="lbl-slots")
+                with TabPane("Logs", id="tab-logs"):
+                    yield Log(id="log-panel", highlight=True)
         with Horizontal(id="controls"):
             yield Button("▶ LLM [s]",    id="btn-start",     variant="success")
             yield Button("■ LLM [q]",    id="btn-stop",      variant="error")
@@ -377,6 +455,7 @@ class LlamaTUI(App):
         self._refresh_status_bar()
         self._refresh_server()
         self._refresh_proxy()
+        self._refresh_monitor()
         self._refresh_stats()
 
     def _refresh_status_bar(self) -> None:
@@ -441,9 +520,18 @@ class LlamaTUI(App):
         self.query_one("#lbl-proxy-health", Label).update(
             f"[bold]Health:[/bold] [{'running' if health else 'stopped'}]"
             f"{'✓ OK' if health else '✗ N/A'}[/{'running' if health else 'stopped'}]")
+        self.query_one("#lbl-proxy-backend", Label).update(
+            f"[bold]Backend:[/bold] {self._proxy_backend}")
 
         self.query_one("#btn-proxy-start", Button).disabled = is_running
         self.query_one("#btn-proxy-stop",  Button).disabled = not is_running
+
+    def _refresh_monitor(self) -> None:
+        up = _port_open(LLAMA_MONITOR_PORT)
+        cls = "running" if up else "stopped"
+        sym = "●" if up else "○"
+        self.query_one("#lbl-monitor-status", Label).update(
+            f"[bold]Monitor:[/bold] [{cls}]{sym} :{LLAMA_MONITOR_PORT}[/{cls}]")
 
     def _refresh_stats(self) -> None:
         s = self._stats.last_stats
@@ -467,6 +555,15 @@ class LlamaTUI(App):
         )
         self.query_one("#lbl-tps-secondary", Label).update(secondary)
         self.query_one("#sparkline-tps", Sparkline).data = history or [0.0]
+        cache_hist = list(self._stats.cache_history)
+        self.query_one("#sparkline-cache", Sparkline).data = cache_hist or [0.0]
+
+        proc = "● processing" if s.is_generating else "○ idle"
+        cache_pct = f"{s.cache_hit_ratio*100:.0f}%" if s.cache_hit_ratio is not None else "—"
+        self.query_one("#lbl-slots", Label).update(
+            f"[bold]État:[/bold] {proc}\n"
+            f"[bold]Prompt:[/bold] {s.prompt_tokens:,}  [bold]Cache:[/bold] {s.prompt_cached:,} ({cache_pct})\n"
+            f"[bold]Ctx:[/bold] {s.n_ctx:,}  [bold]Généré total:[/bold] {s.total_generated:,}")
 
     # ── Log helper ────────────────────────────────────────────────────────
 
@@ -550,6 +647,27 @@ class LlamaTUI(App):
         self._log(f"[{self._ts()}] ■ litellm proxy arrêté")
         self._refresh_ui()
 
+    def action_switch_proxy_backend(self) -> None:
+        was_running = self._proxy.status() == ProxyStatus.RUNNING
+        new_backend = "litellm" if self._proxy_backend == "bun" else "bun"
+        if was_running:
+            self._proxy.stop()
+            self._log(f"[{self._ts()}] ■ proxy arrêté pour switch backend")
+        try:
+            cfg = json.loads(CONFIG_FILE.read_text())
+            cfg["proxy_backend"] = new_backend
+            CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+        except Exception as e:
+            self._log(f"[{self._ts()}] ⚠ persist backend: {e}")
+        self._proxy_backend = new_backend
+        self._proxy = ProxyManager(
+            PROXY_ROOT, port=8001,
+            backend=new_backend, server_port=self._manager._config.port)
+        self._log(f"[{self._ts()}] ⤢ Proxy backend → {new_backend}")
+        if was_running:
+            self.action_start_proxy()
+        self._refresh_ui()
+
     def action_start_all(self) -> None:
         self.action_start_server()
         self.action_start_proxy()
@@ -597,6 +715,27 @@ class LlamaTUI(App):
             self._log(f"[{self._ts()}] ▶ llama-monitor lancé → http://localhost:{LLAMA_MONITOR_PORT}")
         except Exception as e:
             self._log(f"[{self._ts()}] ✗ Erreur llama-monitor: {e}")
+
+    def action_download_model(self) -> None:
+        self.push_screen(DownloadScreen(), self._on_download_result)
+
+    def _on_download_result(self, result) -> None:
+        if result is None:
+            return
+        repo, fn, local = result
+        threading.Thread(
+            target=self._do_download, args=(repo, fn, local), daemon=True
+        ).start()
+
+    def _do_download(self, repo: str, fn: str, local: str | None) -> None:
+        self.call_from_thread(self._log, f"[{self._ts()}] ⬇ Téléchargement {repo}/{fn}")
+        try:
+            info = self._model_mgr.download(repo, fn, local)
+            self.call_from_thread(
+                self._log, f"[{self._ts()}] ✓ {info.name} téléchargé ({info.size_gb:.1f}GB)")
+            self.call_from_thread(self._populate_model_list)
+        except Exception as e:
+            self.call_from_thread(self._log, f"[{self._ts()}] ✗ Download: {e}")
 
     def on_button_pressed(self, event: Button.Pressed) -> None:
         actions = {

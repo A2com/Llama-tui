@@ -1,16 +1,14 @@
+# Playwright / runtime artifacts
+.playwright-mcp/
+logs/
+*.pid
+*.log
 __pycache__/
-*.py[cod]
-*.so
-*.egg-info/
 .pytest_cache/
-.mypy_cache/
-.ruff_cache/
+*.pyc
+
+# Environments / data
 .venv/
 venv/
-env/
-.env
-.DS_Store
-*.pid
-logs/
 models/
 config/server.json

@@ -1,4 +1,5 @@
-const UPSTREAM = "http://localhost:8081/v1";
+const UPSTREAM = process.env.UPSTREAM || "http://localhost:8082/v1";
+const PORT = parseInt(process.env.PORT || "8001", 10);
 
 function mapModel(name: string): string {
   const aliases: Record<string, string> = {
@@ -11,7 +12,7 @@ function mapModel(name: string): string {
 }
 
 const server = Bun.serve({
-  port: 8001,
+  port: PORT,
   async fetch(req) {
     const url = new URL(req.url);
 
@@ -46,6 +47,7 @@ const server = Bun.serve({
         max_tokens: anthropicBody.max_tokens ?? 4096,
         temperature: anthropicBody.temperature ?? 0.7,
         stream: anthropicBody.stream ?? true,
+        chat_template_kwargs: { enable_thinking: false },
       };
 
       const upstream = await fetch(UPSTREAM + "/chat/completions", {

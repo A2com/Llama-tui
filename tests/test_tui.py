@@ -127,3 +127,70 @@ def test_llama_monitor_cmd_includes_models_dir():
     cmd = app._build_llama_monitor_cmd("llama-server")
     assert "--models-dir" in cmd
     assert str(MODELS_DIR) in cmd
+
+
+def test_tui_has_monitor_status_label():
+    """Sidebar doit afficher un label de statut llama-monitor (port 7778)."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "lbl-monitor-status" in tui_src, "lbl-monitor-status manquant"
+
+
+def test_tui_has_download_screen():
+    """DownloadScreen (ModalScreen) doit exister pour télécharger des modèles."""
+    from textual.screen import ModalScreen
+    from src.tui import DownloadScreen
+    assert issubclass(DownloadScreen, ModalScreen), "DownloadScreen n'est pas un ModalScreen"
+
+
+def test_tui_has_download_binding():
+    """Touche n → action download_model."""
+    from src.tui import LlamaTUI
+    bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
+    assert bindings.get("n") == "download_model"
+
+
+def test_tui_has_download_action():
+    from src.tui import LlamaTUI
+    assert hasattr(LlamaTUI, "action_download_model")
+
+
+def test_tui_has_proxy_backend_binding():
+    """Touche b → switch_proxy_backend."""
+    from src.tui import LlamaTUI
+    bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
+    assert bindings.get("b") == "switch_proxy_backend"
+
+
+def test_tui_has_switch_proxy_backend_action():
+    from src.tui import LlamaTUI
+    assert hasattr(LlamaTUI, "action_switch_proxy_backend")
+
+
+def test_tui_has_proxy_backend_label():
+    """Sidebar doit afficher le backend proxy actif."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "lbl-proxy-backend" in tui_src, "lbl-proxy-backend manquant"
+
+
+def test_tui_right_panel_uses_tabbedcontent():
+    """Le panneau droit doit utiliser TabbedContent (Stats/Slots/Logs)."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "TabbedContent" in tui_src, "TabbedContent manquant"
+    assert "TabPane" in tui_src, "TabPane manquant"
+
+
+def test_tui_has_slots_tab():
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "tab-slots" in tui_src, "onglet Slots manquant"
+    assert "lbl-slots" in tui_src, "lbl-slots manquant"
+
+
+def test_tui_has_cache_sparkline():
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "sparkline-cache" in tui_src, "sparkline-cache manquant"
+
+
+def test_stats_collector_has_cache_history():
+    from src.stats_collector import StatsCollector
+    sc = StatsCollector(port=8082)
+    assert hasattr(sc, "cache_history"), "cache_history manquant dans StatsCollector"
