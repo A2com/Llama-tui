@@ -1,3 +1,4 @@
+import os
 import signal
 import subprocess
 from enum import Enum
@@ -13,9 +14,12 @@ class ProxyStatus(str, Enum):
 
 class ProxyManager:
     def __init__(self, config_file: Path, port: int = 8001,
+                 backend: str = "litellm", server_port: int = 8082,
                  pid_file: Path = None, log_dir: Path = None):
         self._config_file = config_file
         self._port = port
+        self._backend = backend
+        self._server_port = server_port
         self._process: subprocess.Popen | None = None
         project_root = config_file.parent.parent
         self.pid_file = pid_file or (project_root / "proxy.pid")
@@ -45,8 +49,17 @@ class ProxyManager:
         self._log_dir.mkdir(parents=True, exist_ok=True)
         log_handle = open(self._log_dir / "proxy.log", "a")
 
-        cmd = ["litellm", "--config", str(self._config_file), "--port", str(self._port)]
-        self._process = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT)
+        if self._backend == "bun":
+            cmd = ["bun", "run", str(self._proxy_script)]
+            env = {
+                **os.environ,
+                "UPSTREAM": f"http://127.0.0.1:{self._server_port}/v1",
+                "PORT": str(self._port),
+            }
+        else:
+            cmd = ["litellm", "--config", str(self._config_file), "--port", str(self._port)]
+            env = None
+        self._process = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT, env=env)
         self.pid_file.write_text(str(self._process.pid))
         return self._process.pid
 

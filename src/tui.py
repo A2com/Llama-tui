@@ -62,6 +62,7 @@ def _ensure_config() -> None:
         "jinja": True,
         "spec_type": "draft-mtp",
         "spec_draft_n_max": 2,
+        "proxy_backend": "bun",
     }, indent=2))
 
 
@@ -101,6 +102,7 @@ class HelpScreen(ModalScreen):
             ("d", "Ouvre Llama WebUI"),
             ("m", "Démarre llama-monitor"),
             ("n", "Télécharge un modèle (HF)"),
+            ("b", "Bascule backend proxy (bun↔litellm)"),
             ("/", "Filtre les modèles par nom"),
             ("Tab", "Focus liste modèles"),
             ("?", "Affiche cette aide"),
@@ -281,6 +283,7 @@ class LlamaTUI(App):
         Binding("d",      "open_activity",  "Llama WebUI"),
         Binding("m",      "start_llama_monitor", "Monitor"),
         Binding("n",      "download_model", "Télécharger"),
+        Binding("b",      "switch_proxy_backend", "Proxy backend"),
         Binding("?",      "help",           "Aide", show=True),
         Binding("slash",  "focus_filter",   "Filtre", show=True),
         Binding("tab",    "focus_models",   "Focus modèles", show=False),
@@ -292,7 +295,15 @@ class LlamaTUI(App):
         self.theme = "textual-dark"
         _ensure_config()
         self._manager       = ServerManager(CONFIG_FILE)
-        self._proxy         = ProxyManager(PROXY_ROOT, port=8001)
+        try:
+            self._proxy_backend = json.loads(CONFIG_FILE.read_text()).get("proxy_backend", "bun")
+        except Exception:
+            self._proxy_backend = "bun"
+        self._proxy         = ProxyManager(
+            PROXY_ROOT, port=8001,
+            backend=self._proxy_backend,
+            server_port=self._manager._config.port,
+        )
         self._model_mgr     = ModelManager(models_dir=MODELS_DIR, config_file=CONFIG_FILE)
         self._status_model  = StatusModel()
         self._logs          = LogBuffer(max_lines=500)
@@ -330,6 +341,7 @@ class LlamaTUI(App):
                 yield Label("", id="lbl-proxy-pid")
                 yield Label("", id="lbl-proxy-port")
                 yield Label("", id="lbl-proxy-health")
+                yield Label("", id="lbl-proxy-backend")
                 yield Static(" ", classes="divider")
                 yield Static("▪ llama-monitor", classes="section")
                 yield Static("─" * 26, classes="divider")
@@ -496,6 +508,8 @@ class LlamaTUI(App):
         self.query_one("#lbl-proxy-health", Label).update(
             f"[bold]Health:[/bold] [{'running' if health else 'stopped'}]"
             f"{'✓ OK' if health else '✗ N/A'}[/{'running' if health else 'stopped'}]")
+        self.query_one("#lbl-proxy-backend", Label).update(
+            f"[bold]Backend:[/bold] {self._proxy_backend}")
 
         self.query_one("#btn-proxy-start", Button).disabled = is_running
         self.query_one("#btn-proxy-stop",  Button).disabled = not is_running
@@ -610,6 +624,27 @@ class LlamaTUI(App):
     def action_stop_proxy(self) -> None:
         self._proxy.stop()
         self._log(f"[{self._ts()}] ■ litellm proxy arrêté")
+        self._refresh_ui()
+
+    def action_switch_proxy_backend(self) -> None:
+        was_running = self._proxy.status() == ProxyStatus.RUNNING
+        new_backend = "litellm" if self._proxy_backend == "bun" else "bun"
+        if was_running:
+            self._proxy.stop()
+            self._log(f"[{self._ts()}] ■ proxy arrêté pour switch backend")
+        try:
+            cfg = json.loads(CONFIG_FILE.read_text())
+            cfg["proxy_backend"] = new_backend
+            CONFIG_FILE.write_text(json.dumps(cfg, indent=2))
+        except Exception as e:
+            self._log(f"[{self._ts()}] ⚠ persist backend: {e}")
+        self._proxy_backend = new_backend
+        self._proxy = ProxyManager(
+            PROXY_ROOT, port=8001,
+            backend=new_backend, server_port=self._manager._config.port)
+        self._log(f"[{self._ts()}] ⤢ Proxy backend → {new_backend}")
+        if was_running:
+            self.action_start_proxy()
         self._refresh_ui()
 
     def action_start_all(self) -> None:

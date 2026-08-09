@@ -71,6 +71,51 @@ def test_start_passes_config_and_port(manager):
     assert "8001" in cmd
 
 
+# ── Backend Bun (fast_proxy.ts) ──────────────────────────────────────────────
+
+def test_start_uses_bun_binary_when_backend_bun(tmp_path):
+    pm = ProxyManager(
+        config_file=PROJECT_ROOT / "config" / "litellm.yaml",
+        port=8001, backend="bun", server_port=8082,
+        pid_file=tmp_path / "bun.pid", log_dir=tmp_path,
+    )
+    fake = MagicMock()
+    fake.pid = 7
+    fake.poll.return_value = None
+    with patch("subprocess.Popen", return_value=fake) as mock_popen:
+        pm.start()
+    cmd = mock_popen.call_args[0][0]
+    assert cmd[0] == "bun"
+    assert "run" in cmd
+    assert str(pm._proxy_script) in " ".join(cmd)
+
+
+def test_start_bun_passes_env_upstream_port(tmp_path):
+    pm = ProxyManager(
+        config_file=PROJECT_ROOT / "config" / "litellm.yaml",
+        port=8001, backend="bun", server_port=8082,
+        pid_file=tmp_path / "bun.pid", log_dir=tmp_path,
+    )
+    fake = MagicMock()
+    fake.pid = 7
+    fake.poll.return_value = None
+    with patch("subprocess.Popen", return_value=fake) as mock_popen:
+        pm.start()
+    env = mock_popen.call_args.kwargs.get("env") or mock_popen.call_args[1].get("env")
+    assert env is not None, "bun backend doit passer un env avec UPSTREAM/PORT"
+    assert env["UPSTREAM"] == "http://127.0.0.1:8082/v1"
+    assert env["PORT"] == "8001"
+
+
+def test_backend_default_is_litellm(tmp_path):
+    pm = ProxyManager(
+        config_file=PROJECT_ROOT / "config" / "litellm.yaml",
+        port=8001,
+        pid_file=tmp_path / "p.pid", log_dir=tmp_path,
+    )
+    assert pm._backend == "litellm"
+
+
 def test_status_running_after_start(manager):
     fake = MagicMock()
     fake.pid = 1

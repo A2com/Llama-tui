@@ -152,3 +152,21 @@ def test_tui_has_download_binding():
 def test_tui_has_download_action():
     from src.tui import LlamaTUI
     assert hasattr(LlamaTUI, "action_download_model")
+
+
+def test_tui_has_proxy_backend_binding():
+    """Touche b → switch_proxy_backend."""
+    from src.tui import LlamaTUI
+    bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
+    assert bindings.get("b") == "switch_proxy_backend"
+
+
+def test_tui_has_switch_proxy_backend_action():
+    from src.tui import LlamaTUI
+    assert hasattr(LlamaTUI, "action_switch_proxy_backend")
+
+
+def test_tui_has_proxy_backend_label():
+    """Sidebar doit afficher le backend proxy actif."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "lbl-proxy-backend" in tui_src, "lbl-proxy-backend manquant"
