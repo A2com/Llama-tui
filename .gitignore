@@ -6,3 +6,9 @@ logs/
 __pycache__/
 .pytest_cache/
 *.pyc
+
+# Environments / data
+.venv/
+venv/
+models/
+config/server.json
