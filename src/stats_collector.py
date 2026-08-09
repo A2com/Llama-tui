@@ -41,6 +41,7 @@ class StatsCollector:
         self._total_generated: int = 0
         self.last_stats = TokenStats()
         self.history: deque[float] = deque(maxlen=self.MAX_HISTORY)
+        self.cache_history: deque[float] = deque(maxlen=self.MAX_HISTORY)
 
     def poll(self) -> TokenStats:
         try:
@@ -57,6 +58,9 @@ class StatsCollector:
         n_ctx = slot.get("n_ctx", 0)
         n_prompt = slot.get("n_prompt_tokens", 0)
         n_cached = slot.get("n_prompt_tokens_cache", 0)
+        processed = n_prompt + n_cached
+        cache_pct = (n_cached / processed * 100.0) if processed > 0 else 0.0
+        self.cache_history.append(cache_pct)
         now = time.monotonic()
 
         avg_tps = sum(self.history) / len(self.history) if self.history else None

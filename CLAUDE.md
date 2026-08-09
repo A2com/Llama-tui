@@ -45,12 +45,12 @@ pytest tests/test_server_manager.py::test_start_returns_pid
 src/
   config.py          # ServerConfig: loads config/server.json, validates, generates llama-server CLI args
   server_manager.py  # ServerManager: subprocess lifecycle for llama-server (start/stop/status/health)
-  proxy_manager.py   # ProxyManager: subprocess lifecycle for litellm (start/stop/status/health)
-  model_manager.py   # ModelManager: scans models/, rewrites config/server.json to switch models
-  stats_collector.py # StatsCollector: polls llama-server /slots for live tokens/sec
+  proxy_manager.py   # ProxyManager: subprocess lifecycle for litellm / Bun backend (start/stop/status/health)
+  model_manager.py   # ModelManager: scans models/, rewrites config/server.json to switch models, hf download
+  stats_collector.py # StatsCollector: polls llama-server /slots for live tokens/sec and cache history
   tui_model.py       # StatusModel + LogBuffer: pure state containers (no I/O)
   tui.py             # LlamaTUI(App): Textual app, composes everything, 0.5s poll loop via thread
-  fast_proxy.ts      # Bun alternative to litellm (not active, kept as fallback)
+  fast_proxy.ts      # Bun proxy backend: Anthropic → OpenAI translation, /health passthrough
 ```
 
 ### Config files
@@ -73,9 +73,16 @@ src/
 | `q` | Stop llama-server |
 | `r` | Restart llama-server |
 | `l` | Load selected model |
-| `p` | Start litellm proxy |
-| `o` | Stop litellm proxy |
+| `p` | Start proxy |
+| `o` | Stop proxy |
+| `b` | Switch proxy backend (bun ↔ litellm) |
 | `a` | Start all |
 | `z` | Stop all |
+| `n` | Download model from HuggingFace |
+| `m` | Start llama-monitor |
+| `d` | Open Llama WebUI |
+| `c` | Clear logs |
+| `/` | Filter models |
 | `Tab` | Focus model list |
+| `?` | Show help |
 | `Ctrl+Q` | Quit |

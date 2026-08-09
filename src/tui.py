@@ -12,7 +12,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input, TabbedContent, TabPane
 
 from src.model_manager import ModelManager
 from src.proxy_manager import ProxyManager, ProxyStatus
@@ -165,8 +165,8 @@ class LlamaTUI(App):
     /* ── Barre de statut globale ── */
     #status-bar {
         height: 1;
-        background: $surface-darken-2;
-        color: $text;
+        background: #1e1f1c;
+        color: #f8f8f2;
         padding: 0 1;
         text-style: bold;
     }
@@ -228,23 +228,23 @@ class LlamaTUI(App):
         margin: 0 1;
         width: 18;
         height: 3;
-        background: #2f3c42;
-        color: #d0d8dc;
+        background: #272822;
+        color: #f8f8f2;
     }
-    Button:hover { background: #3a4a52; color: #ffffff; }
-    Button:disabled { background: #1a2226; color: #5a6a70; }
-    .Button--success   { color: #7ec883; }
-    .Button--success:hover   { color: #a0e8a3; }
-    .Button--success:disabled { color: #3a4a3a; }
-    .Button--error     { color: #e06c75; }
-    .Button--error:hover     { color: #ff8a91; }
-    .Button--error:disabled  { color: #4a2a2e; }
-    .Button--warning   { color: #e5c07b; }
-    .Button--warning:hover   { color: #ffe08a; }
-    .Button--warning:disabled { color: #4a3e2e; }
-    .Button--primary   { color: #61afef; }
-    .Button--primary:hover   { color: #8ac4ff; }
-    .Button--primary:disabled { color: #2e3a4a; }
+    Button:hover { background: #3e3d32; color: #ffffff; }
+    Button:disabled { background: #1e1f1c; color: #75715a; }
+    .Button--success   { color: #a6e22e; }
+    .Button--success:hover   { color: #c8f54a; }
+    .Button--success:disabled { color: #4a5a1e; }
+    .Button--error     { color: #f92672; }
+    .Button--error:hover     { color: #ff5c8f; }
+    .Button--error:disabled  { color: #5a1e3a; }
+    .Button--warning   { color: #fd971f; }
+    .Button--warning:hover   { color: #ffb84d; }
+    .Button--warning:disabled { color: #5a3e1e; }
+    .Button--primary   { color: #66d9ef; }
+    .Button--primary:hover   { color: #8ce8f5; }
+    .Button--primary:disabled { color: #2e5a6a; }
 
     .running  { color: $success; }
     .stopped  { color: $error; }
@@ -252,22 +252,27 @@ class LlamaTUI(App):
     .divider  { color: $surface-lighten-1; }
     .hint     { color: $text-muted; text-style: italic; }
 
-    /* ── Panneau droit (stats + log) ── */
-    #right-panel { height: 1fr; }
+    /* ── Panneau droit (onglets Stats/Slots/Logs) ── */
+    #right-tabs { height: 1fr; }
 
     /* ── Stats enrichies ── */
     #stats-panel {
         border: solid $surface-lighten-1;
-        height: 7;
+        height: auto;
         padding: 0 1;
     }
     #stats-grid { height: auto; }
     #stats-grid Label { margin-bottom: 0; }
-    #lbl-tps { color: $warning; text-style: bold; }
-    #lbl-tps-secondary { color: $text-muted; }
+    #lbl-tps { color: #fd971f; text-style: bold; }
+    #lbl-tps-secondary { color: #75715a; }
     #sparkline-tps { height: 2; }
-    #sparkline-tps > .sparkline--max-color { color: $warning; }
-    #sparkline-tps > .sparkline--min-color { color: $warning-darken-3; }
+    #sparkline-tps > .sparkline--max-color { color: #fd971f; }
+    #sparkline-tps > .sparkline--min-color { color: #75715a; }
+    #sparkline-cache { height: 2; }
+    #sparkline-cache > .sparkline--max-color { color: #a6e22e; }
+    #sparkline-cache > .sparkline--min-color { color: #75715a; }
+    #tab-slots { padding: 0 1; }
+    #lbl-slots { color: #f8f8f2; }
     """
 
     BINDINGS = [
@@ -346,13 +351,20 @@ class LlamaTUI(App):
                 yield Static("▪ llama-monitor", classes="section")
                 yield Static("─" * 26, classes="divider")
                 yield Label("", id="lbl-monitor-status")
-            with Vertical(id="right-panel"):
-                with Vertical(id="stats-panel"):
-                    yield Static("▪ Performance", classes="section")
-                    yield Label("", id="lbl-tps-secondary")
-                    yield Label("— t/s", id="lbl-tps")
-                    yield Sparkline([], id="sparkline-tps", summary_function=max)
-                yield Log(id="log-panel", highlight=True)
+            with TabbedContent(id="right-tabs"):
+                with TabPane("Stats", id="tab-stats"):
+                    with Vertical(id="stats-panel"):
+                        yield Static("▪ Performance", classes="section")
+                        yield Label("", id="lbl-tps-secondary")
+                        yield Label("— t/s", id="lbl-tps")
+                        yield Sparkline([], id="sparkline-tps", summary_function=max)
+                        yield Sparkline([], id="sparkline-cache", summary_function=max)
+                with TabPane("Slots", id="tab-slots"):
+                    yield Static("▪ Slots", classes="section")
+                    yield Static("─" * 40, classes="divider")
+                    yield Label("", id="lbl-slots")
+                with TabPane("Logs", id="tab-logs"):
+                    yield Log(id="log-panel", highlight=True)
         with Horizontal(id="controls"):
             yield Button("▶ LLM [s]",    id="btn-start",     variant="success")
             yield Button("■ LLM [q]",    id="btn-stop",      variant="error")
@@ -543,6 +555,15 @@ class LlamaTUI(App):
         )
         self.query_one("#lbl-tps-secondary", Label).update(secondary)
         self.query_one("#sparkline-tps", Sparkline).data = history or [0.0]
+        cache_hist = list(self._stats.cache_history)
+        self.query_one("#sparkline-cache", Sparkline).data = cache_hist or [0.0]
+
+        proc = "● processing" if s.is_generating else "○ idle"
+        cache_pct = f"{s.cache_hit_ratio*100:.0f}%" if s.cache_hit_ratio is not None else "—"
+        self.query_one("#lbl-slots", Label).update(
+            f"[bold]État:[/bold] {proc}\n"
+            f"[bold]Prompt:[/bold] {s.prompt_tokens:,}  [bold]Cache:[/bold] {s.prompt_cached:,} ({cache_pct})\n"
+            f"[bold]Ctx:[/bold] {s.n_ctx:,}  [bold]Généré total:[/bold] {s.total_generated:,}")
 
     # ── Log helper ────────────────────────────────────────────────────────
 

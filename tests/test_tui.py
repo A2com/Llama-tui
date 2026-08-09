@@ -170,3 +170,27 @@ def test_tui_has_proxy_backend_label():
     """Sidebar doit afficher le backend proxy actif."""
     tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
     assert "lbl-proxy-backend" in tui_src, "lbl-proxy-backend manquant"
+
+
+def test_tui_right_panel_uses_tabbedcontent():
+    """Le panneau droit doit utiliser TabbedContent (Stats/Slots/Logs)."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "TabbedContent" in tui_src, "TabbedContent manquant"
+    assert "TabPane" in tui_src, "TabPane manquant"
+
+
+def test_tui_has_slots_tab():
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "tab-slots" in tui_src, "onglet Slots manquant"
+    assert "lbl-slots" in tui_src, "lbl-slots manquant"
+
+
+def test_tui_has_cache_sparkline():
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "sparkline-cache" in tui_src, "sparkline-cache manquant"
+
+
+def test_stats_collector_has_cache_history():
+    from src.stats_collector import StatsCollector
+    sc = StatsCollector(port=8082)
+    assert hasattr(sc, "cache_history"), "cache_history manquant dans StatsCollector"
