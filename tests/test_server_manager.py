@@ -80,6 +80,17 @@ def test_start_uses_correct_binary(manager):
     assert cmd[0] == "llama-server"
 
 
+def test_start_uses_env_binary(manager, monkeypatch):
+    monkeypatch.setenv("LLAMA_TUI_SERVER_BIN", "/custom/llama-server")
+    fake_proc = MagicMock()
+    fake_proc.pid = 1
+    fake_proc.poll.return_value = None
+    with patch("subprocess.Popen", return_value=fake_proc) as mock_popen:
+        manager.start()
+    cmd = mock_popen.call_args[0][0]
+    assert cmd[0] == "/custom/llama-server"
+
+
 def test_status_is_running_after_start(manager):
     fake_proc = MagicMock()
     fake_proc.pid = 99
@@ -165,4 +176,15 @@ def test_health_check_false_on_http_error(manager):
     with patch("subprocess.Popen", return_value=fake_proc):
         manager.start()
     with patch("httpx.get", side_effect=Exception("connection refused")):
+        assert manager.health_check() is False
+
+
+def test_health_check_false_on_500(manager):
+    fake_proc = MagicMock()
+    fake_proc.pid = 99
+    fake_proc.poll.return_value = None
+    with patch("subprocess.Popen", return_value=fake_proc):
+        manager.start()
+    with patch("httpx.get") as mock_get:
+        mock_get.return_value.status_code = 500
         assert manager.health_check() is False

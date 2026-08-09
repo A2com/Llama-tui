@@ -136,6 +136,34 @@ def test_config_to_cli_args(tmp_path):
     assert "--parallel" in args
 
 
+def test_cli_args_flash_attn_value_form(tmp_path):
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps({
+        "model": "/some/model.gguf", "host": "0.0.0.0", "port": 8080,
+        "n_gpu_layers": 99, "ctx_size": 32768, "batch_size": 2048,
+        "ubatch_size": 512, "threads": 12, "flash_attn": True,
+        "parallel": 4, "cont_batching": True,
+        "cache_type_k": "q8_0", "cache_type_v": "q8_0",
+    }))
+    args = ServerConfig.from_file(cfg_file).to_cli_args()
+    i = args.index("--flash-attn")
+    assert args[i + 1] == "on"
+
+
+def test_cli_args_flash_attn_off_when_false(tmp_path):
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps({
+        "model": "/some/model.gguf", "host": "0.0.0.0", "port": 8080,
+        "n_gpu_layers": 99, "ctx_size": 32768, "batch_size": 2048,
+        "ubatch_size": 512, "threads": 12, "flash_attn": False,
+        "parallel": 4, "cont_batching": True,
+        "cache_type_k": "q8_0", "cache_type_v": "q8_0",
+    }))
+    args = ServerConfig.from_file(cfg_file).to_cli_args()
+    i = args.index("--flash-attn")
+    assert args[i + 1] == "off"
+
+
 def test_config_full_gpu_offload(tmp_path):
     cfg_file = tmp_path / "server.json"
     cfg_file.write_text(json.dumps({

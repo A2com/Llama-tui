@@ -69,7 +69,8 @@ class ServerManager:
         self._log_dir.mkdir(parents=True, exist_ok=True)
         log_handle = open(self._log_dir / "server.log", "a")
 
-        cmd = ["llama-server"] + self._config.to_cli_args()
+        binary = os.environ.get("LLAMA_TUI_SERVER_BIN", "llama-server")
+        cmd = [binary] + self._config.to_cli_args()
         self._process = subprocess.Popen(cmd, stdout=log_handle, stderr=subprocess.STDOUT)
         self.pid_file.write_text(str(self._process.pid))
         return self._process.pid

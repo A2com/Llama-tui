@@ -33,6 +33,7 @@ pytest tests/test_server_manager.py::test_start_returns_pid
 |----------|---------|---------|
 | `LLAMA_TUI_MODELS_DIR` | `PROJECT_ROOT/models` | Directory containing `.gguf` files |
 | `LLAMA_TUI_CONFIG` | `PROJECT_ROOT/config/server.json` | llama-server config file |
+| `LLAMA_TUI_SERVER_BIN` | `llama-server` | llama-server binary path (override for side-by-side version testing) |
 | `LLAMA_TUI_LITELLM_CONFIG` | `PROJECT_ROOT/config/litellm.yaml` | litellm proxy config |
 | `LLAMA_TUI_MONITOR_BIN` | `~/llama-monitor/target/release/llama-monitor` | llama-monitor binary path |
 | `LLAMA_TUI_MONITOR_PORT` | `7778` | llama-monitor web port |
