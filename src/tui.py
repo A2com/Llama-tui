@@ -43,7 +43,7 @@ def _ensure_config() -> None:
         "host": "0.0.0.0",
         "port": 8082,
         "n_gpu_layers": 99,
-        "ctx_size": 32768,
+        "ctx_size": 131072,
         "batch_size": 2048,
         "ubatch_size": 2048,
         "threads": 12,
