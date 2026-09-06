@@ -18,6 +18,7 @@ from src.model_manager import ModelManager
 from src.proxy_manager import ProxyManager, ProxyStatus
 from src.server_manager import ServerManager, ServerStatus
 from src.stats_collector import StatsCollector
+from src.task_profiles import TaskProfileError, TaskProfileManager
 from src.tui_model import LogBuffer, StatusModel
 
 PROJECT_ROOT = Path(__file__).parent.parent
@@ -27,6 +28,7 @@ MODELS_DIR   = Path(os.environ.get("LLAMA_TUI_MODELS_DIR", PROJECT_ROOT / "model
 LLAMA_MONITOR_BIN = Path(os.environ.get("LLAMA_TUI_MONITOR_BIN", Path.home() / "llama-monitor" / "target" / "release" / "llama-monitor"))
 LLAMA_MONITOR_PORT = int(os.environ.get("LLAMA_TUI_MONITOR_PORT", 7778))
 LLAMA_MONITOR_PRESETS = Path(os.environ.get("LLAMA_TUI_MONITOR_PRESETS", PROJECT_ROOT / "config" / "llama-monitor-presets.json"))
+TASK_PROFILES_FILE = Path(os.environ.get("LLAMA_TUI_TASK_PROFILES", PROJECT_ROOT / "config" / "task-profiles.json"))
 
 
 DEFAULT_MODEL = "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf"
@@ -103,6 +105,7 @@ class HelpScreen(ModalScreen):
             ("m", "Démarre llama-monitor"),
             ("n", "Télécharge un modèle (HF)"),
             ("b", "Bascule backend proxy (bun↔litellm)"),
+            ("t", "Profil de tâche (vitesse/qualité)"),
             ("/", "Filtre les modèles par nom"),
             ("Tab", "Focus liste modèles"),
             ("?", "Affiche cette aide"),
@@ -156,6 +159,49 @@ class DownloadScreen(ModalScreen):
         if not repo or not fn:
             return
         self.dismiss((repo, fn, local))
+
+
+class TaskProfileScreen(ModalScreen):
+    """Overlay de sélection de profil de tâche — touche t."""
+
+    BINDINGS = [Binding("escape", "dismiss", "Fermer", show=True)]
+
+    CSS = """
+    TaskProfileScreen { align: center middle; }
+    #profile-card {
+        width: 60; max-height: 80%;
+        border: solid $primary; background: $surface; padding: 1 2;
+    }
+    #profile-card .title { color: $primary; text-style: bold; }
+    ListItem.active-profile { color: $success; text-style: bold; }
+    """
+
+    def __init__(self, profiles, active_path: Path | None):
+        super().__init__()
+        self._profiles = profiles
+        self._active_path = active_path
+
+    def compose(self) -> ComposeResult:
+        with VerticalScroll(id="profile-card"):
+            yield Static("▪ Profil de tâche", classes="title")
+            yield Static("─" * 30, classes="divider")
+            yield ListView(id="profile-list")
+            yield Static("[dim]Entrée pour activer · Esc pour fermer[/dim]")
+
+    def on_mount(self) -> None:
+        lv = self.query_one("#profile-list", ListView)
+        for profile in self._profiles:
+            is_active = profile.model_path == self._active_path
+            prefix = "● " if is_active else "  "
+            item = ListItem(Label(f"{prefix}{profile.name}"))
+            item.profile_name = profile.name
+            if is_active:
+                item.add_class("active-profile")
+            lv.append(item)
+        lv.focus()
+
+    def on_list_view_selected(self, event: ListView.Selected) -> None:
+        self.dismiss(event.item.profile_name)
 
 
 class LlamaTUI(App):
@@ -289,6 +335,7 @@ class LlamaTUI(App):
         Binding("m",      "start_llama_monitor", "Monitor"),
         Binding("n",      "download_model", "Télécharger"),
         Binding("b",      "switch_proxy_backend", "Proxy backend"),
+        Binding("t",      "task_profile",   "Profil tâche"),
         Binding("?",      "help",           "Aide", show=True),
         Binding("slash",  "focus_filter",   "Filtre", show=True),
         Binding("tab",    "focus_models",   "Focus modèles", show=False),
@@ -310,6 +357,7 @@ class LlamaTUI(App):
             server_port=self._manager._config.port,
         )
         self._model_mgr     = ModelManager(models_dir=MODELS_DIR, config_file=CONFIG_FILE)
+        self._task_profile_mgr = TaskProfileManager(profiles_file=TASK_PROFILES_FILE, project_root=PROJECT_ROOT)
         self._status_model  = StatusModel()
         self._logs          = LogBuffer(max_lines=500)
         self._stats         = StatsCollector(port=self._manager._config.port)
@@ -587,7 +635,9 @@ class LlamaTUI(App):
         if path == self._model_mgr.active_model:
             self._log(f"[{self._ts()}] ⚠ Modèle déjà actif")
             return
+        self._load_and_restart(path)
 
+    def _load_and_restart(self, path: Path) -> None:
         was_running = self._manager.status() == ServerStatus.RUNNING
         self._log(f"[{self._ts()}] ⏏ Chargement → {path.stem}")
 
@@ -606,6 +656,31 @@ class LlamaTUI(App):
             self.action_start_server()
 
         self._refresh_ui()
+
+    def action_task_profile(self) -> None:
+        try:
+            profiles = self._task_profile_mgr.list_profiles()
+        except TaskProfileError as e:
+            self._log(f"[{self._ts()}] ✗ Profils de tâche : {e}")
+            return
+        self.push_screen(
+            TaskProfileScreen(profiles, active_path=self._model_mgr.active_model),
+            self._on_task_profile_result,
+        )
+
+    def _on_task_profile_result(self, name: str | None) -> None:
+        if name is None:
+            return
+        try:
+            profiles = self._task_profile_mgr.list_profiles()
+            path = next(p.model_path for p in profiles if p.name == name)
+        except (TaskProfileError, StopIteration) as e:
+            self._log(f"[{self._ts()}] ✗ Profil '{name}' : {e}")
+            return
+        if path == self._model_mgr.active_model:
+            self._log(f"[{self._ts()}] ⚠ Profil '{name}' déjà actif")
+            return
+        self._load_and_restart(path)
 
     def action_focus_models(self) -> None:
         self.query_one("#model-list", ListView).focus()

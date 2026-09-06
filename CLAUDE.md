@@ -38,6 +38,7 @@ pytest tests/test_server_manager.py::test_start_returns_pid
 | `LLAMA_TUI_MONITOR_BIN` | `~/llama-monitor/target/release/llama-monitor` | llama-monitor binary path |
 | `LLAMA_TUI_MONITOR_PORT` | `7778` | llama-monitor web port |
 | `LLAMA_TUI_MONITOR_PRESETS` | `PROJECT_ROOT/config/llama-monitor-presets.json` | monitor presets file |
+| `LLAMA_TUI_TASK_PROFILES` | `PROJECT_ROOT/config/task-profiles.json` | named model-switch profiles (e.g. vitesse/qualite) |
 
 ## Architecture
 
@@ -55,8 +56,9 @@ src/
 
 ### Config files
 
-- `config/server.json` — llama-server parameters (model path, ctx size, GPU layers, etc.). `host` must be `0.0.0.0`. `ModelManager.load()` rewrites the `model` field here to switch models. Relative paths are resolved from the project root.
+- `config/server.json` — llama-server parameters (model path, ctx size, GPU layers, etc.). `host` must be `0.0.0.0`. `ModelManager.load()` rewrites the `model` field here to switch models. Relative paths are resolved from the project root. A model's `.json` sidecar (same stem) can set `spec_type`/`spec_draft_n_max` explicitly — sidecar wins over the filename-based MTP heuristic (`"MTP"` in name).
 - `config/litellm.yaml` — litellm model list: maps Claude model names to `openai/qwen3` pointing at `http://127.0.0.1:8082/v1`.
+- `config/task-profiles.json` — named task profiles (`[{"name": ..., "model": "models/xxx.gguf"}, ...]`), switchable from the TUI (`t` key) without touching `server.json` by hand. `TaskProfileManager` (`src/task_profiles.py`) resolves a profile to a model path and delegates to `ModelManager.load()`.
 
 ### Key design constraints
 
@@ -76,6 +78,7 @@ src/
 | `p` | Start proxy |
 | `o` | Stop proxy |
 | `b` | Switch proxy backend (bun ↔ litellm) |
+| `t` | Switch task profile (vitesse/qualite) |
 | `a` | Start all |
 | `z` | Stop all |
 | `n` | Download model from HuggingFace |

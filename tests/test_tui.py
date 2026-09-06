@@ -194,3 +194,26 @@ def test_stats_collector_has_cache_history():
     from src.stats_collector import StatsCollector
     sc = StatsCollector(port=8082)
     assert hasattr(sc, "cache_history"), "cache_history manquant dans StatsCollector"
+
+
+def test_tui_has_task_profile_binding():
+    """Touche t → action task_profile."""
+    from src.tui import LlamaTUI
+    bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
+    assert bindings.get("t") == "task_profile"
+
+
+def test_tui_has_task_profile_action():
+    from src.tui import LlamaTUI
+    assert hasattr(LlamaTUI, "action_task_profile")
+
+
+def test_tui_has_task_profile_screen():
+    from textual.screen import ModalScreen
+    from src.tui import TaskProfileScreen
+    assert issubclass(TaskProfileScreen, ModalScreen), "TaskProfileScreen n'est pas un ModalScreen"
+
+
+def test_tui_task_profiles_file_constant():
+    from src.tui import TASK_PROFILES_FILE, PROJECT_ROOT
+    assert TASK_PROFILES_FILE == PROJECT_ROOT / "config" / "task-profiles.json"

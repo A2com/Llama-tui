@@ -83,15 +83,19 @@ class ModelManager:
         except ValueError:
             cfg["model"] = str(path)
         sidecar = path.with_suffix(".json")
+        sidecar_sets_spec = False
         if sidecar.exists():
             sidecar_data = json.loads(sidecar.read_text())
             cfg.update(sidecar_data)
-        if "MTP" in path.name.upper():
-            cfg["spec_type"] = "draft-mtp"
-            cfg["spec_draft_n_max"] = 2
-        else:
-            cfg.pop("spec_type", None)
-            cfg.pop("spec_draft_n_max", None)
+            sidecar_sets_spec = "spec_type" in sidecar_data
+
+        if not sidecar_sets_spec:
+            if "MTP" in path.name.upper():
+                cfg["spec_type"] = "draft-mtp"
+                cfg["spec_draft_n_max"] = 2
+            else:
+                cfg.pop("spec_type", None)
+                cfg.pop("spec_draft_n_max", None)
         self._config_file.write_text(json.dumps(cfg, indent=2))
 
     def download(self, repo_id: str, filename: str, local_filename: str = None) -> ModelInfo:
