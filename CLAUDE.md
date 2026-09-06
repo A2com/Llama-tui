@@ -51,6 +51,7 @@ src/
   stats_collector.py # StatsCollector: polls llama-server /slots for live tokens/sec and cache history
   tui_model.py       # StatusModel + LogBuffer: pure state containers (no I/O)
   tui.py             # LlamaTUI(App): Textual app, composes everything, 0.5s poll loop via thread
+  version.py         # current_version_string()/check_version(): parses `llama-server --version` (build# or semver)
   fast_proxy.ts      # Bun proxy backend: Anthropic → OpenAI translation, /health passthrough
 ```
 

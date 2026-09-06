@@ -135,6 +135,19 @@ def test_tui_has_monitor_status_label():
     assert "lbl-monitor-status" in tui_src, "lbl-monitor-status manquant"
 
 
+def test_tui_has_llama_version_label():
+    """Sidebar doit afficher la version de llama.cpp active."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "lbl-llama-version" in tui_src, "lbl-llama-version manquant"
+
+
+def test_tui_exposes_llama_version_attribute():
+    """La version llama.cpp est calculée une fois à l'init (pas de subprocess dans la boucle de poll)."""
+    from src.tui import LlamaTUI
+    app = LlamaTUI()
+    assert hasattr(app, "_llama_version")
+
+
 def test_tui_has_download_screen():
     """DownloadScreen (ModalScreen) doit exister pour télécharger des modèles."""
     from textual.screen import ModalScreen

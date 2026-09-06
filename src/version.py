@@ -2,26 +2,37 @@ import os
 import re
 import subprocess
 
-_VERSION_RE = re.compile(r"version:\s*(\d+)")
+_VERSION_RE = re.compile(r"version:\s*(\S+)")
 
 
 def _server_binary() -> str:
     return os.environ.get("LLAMA_TUI_SERVER_BIN", "llama-server")
 
 
-def _current_version() -> int | None:
+def _raw_version_output() -> str | None:
     try:
-        out = subprocess.check_output(
+        return subprocess.check_output(
             [_server_binary(), "--version"],
             stderr=subprocess.STDOUT,
             text=True,
         )
     except Exception:
         return None
+
+
+def current_version_string() -> str | None:
+    out = _raw_version_output()
+    if out is None:
+        return None
     m = _VERSION_RE.search(out)
-    return int(m.group(1)) if m else None
+    return m.group(1) if m else None
 
 
 def check_version(min_version: int) -> bool:
-    v = _current_version()
-    return v is not None and v >= min_version
+    v = current_version_string()
+    if v is None:
+        return False
+    if v.isdigit():
+        return int(v) >= min_version
+    # semver build (e.g. "0.4.0") supersedes any legacy build-number scheme
+    return True

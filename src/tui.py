@@ -20,6 +20,7 @@ from src.server_manager import ServerManager, ServerStatus
 from src.stats_collector import StatsCollector
 from src.task_profiles import TaskProfileError, TaskProfileManager
 from src.tui_model import LogBuffer, StatusModel
+from src.version import current_version_string
 
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE  = Path(os.environ.get("LLAMA_TUI_CONFIG", PROJECT_ROOT / "config" / "server.json"))
@@ -361,6 +362,7 @@ class LlamaTUI(App):
         self._status_model  = StatusModel()
         self._logs          = LogBuffer(max_lines=500)
         self._stats         = StatsCollector(port=self._manager._config.port)
+        self._llama_version = current_version_string()
         self._server_start_time: float | None = None
         self._poll_thread: threading.Thread | None = None
         self._running       = True
@@ -387,6 +389,7 @@ class LlamaTUI(App):
                 yield Label("", id="lbl-ctx")
                 yield Label("", id="lbl-gpu")
                 yield Label("", id="lbl-health")
+                yield Label("", id="lbl-llama-version")
                 yield Static(" ", classes="divider")
                 yield Static("▪ litellm proxy", classes="section")
                 yield Static("─" * 26, classes="divider")
@@ -547,6 +550,8 @@ class LlamaTUI(App):
         self.query_one("#lbl-health", Label).update(
             f"[bold]Health:[/bold] [{'running' if health else 'stopped'}]"
             f"{'✓ OK' if health else '✗ N/A'}[/{'running' if health else 'stopped'}]")
+        self.query_one("#lbl-llama-version", Label).update(
+            f"[bold]llama.cpp:[/bold] {self._llama_version or '—'}")
 
         self.query_one("#btn-start",   Button).disabled = is_running
         self.query_one("#btn-stop",    Button).disabled = not is_running
@@ -689,6 +694,7 @@ class LlamaTUI(App):
         try:
             pid = self._manager.start()
             self._server_start_time = time.monotonic()
+            self._llama_version = current_version_string()
             self._log(f"[{self._ts()}] ▶ llama-server démarré (PID {pid})")
             self._refresh_ui()
         except RuntimeError as e:
