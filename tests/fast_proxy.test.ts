@@ -22,9 +22,15 @@ beforeAll(async () => {
       }
       const body = await req.json();
       lastUpstreamBody = body;
+      const emptyContent = body.model === "qwen-reasoning-empty";
       const openaiResp = {
         id: "chatcmpl-test",
-        choices: [{ index: 0, finish_reason: "stop", message: { role: "assistant", content: "OK" } }],
+        choices: [{
+          index: 0, finish_reason: "stop",
+          message: emptyContent
+            ? { role: "assistant", content: "", reasoning_content: "réflexion tronquée" }
+            : { role: "assistant", content: "OK" },
+        }],
         usage: { prompt_tokens: 5, completion_tokens: 1, total_tokens: 6 },
       };
       if (body.stream) {
@@ -120,5 +126,57 @@ describe("fast_proxy /v1/messages", () => {
     const res = await handleRequest(new Request(`http://localhost:${PROXY_PORT}/health`), MOCK_UPSTREAM);
     expect(res.status).toBe(200);
     expect(await res.text()).toContain("ok");
+  });
+
+  test("bloc image Anthropic (base64) → image_url data-uri OpenAI en amont", async () => {
+    lastUpstreamBody = null;
+    await callProxy({
+      model: "qwen",
+      max_tokens: 20,
+      stream: false,
+      messages: [{
+        role: "user",
+        content: [
+          { type: "text", text: "décris cette image" },
+          { type: "image", source: { type: "base64", media_type: "image/png", data: "iVBORw0KGgo=" } },
+        ],
+      }],
+    });
+    expect(lastUpstreamBody).not.toBeNull();
+    const parts = lastUpstreamBody.messages[0].content;
+    expect(parts[0]).toEqual({ type: "text", text: "décris cette image" });
+    expect(parts[1]).toEqual({
+      type: "image_url",
+      image_url: { url: "data:image/png;base64,iVBORw0KGgo=" },
+    });
+  });
+
+  test("content texte simple (string) reste inchangé en amont", async () => {
+    lastUpstreamBody = null;
+    await callProxy({ model: "qwen", max_tokens: 20, stream: false, messages: [{ role: "user", content: "hi" }] });
+    expect(lastUpstreamBody.messages[0].content).toBe("hi");
+  });
+
+  test("thinking désactivé par défaut (comportement actuel verrouillé)", async () => {
+    lastUpstreamBody = null;
+    await callProxy({ model: "qwen", max_tokens: 20, stream: false, messages: [{ role: "user", content: "hi" }] });
+    expect(lastUpstreamBody.chat_template_kwargs.enable_thinking).toBe(false);
+  });
+
+  test("stream:false replie message.reasoning_content si content vide (budget consommé par le thinking)", async () => {
+    const res = await callProxy({
+      model: "qwen-reasoning-empty", max_tokens: 20, stream: false,
+      messages: [{ role: "user", content: "hi" }],
+    });
+    const json = await res.json();
+    expect(json.content[0].text).toBe("réflexion tronquée");
+  });
+
+  test("ENABLE_THINKING=1 → enable_thinking true en amont", async () => {
+    process.env.ENABLE_THINKING = "1";
+    lastUpstreamBody = null;
+    await callProxy({ model: "qwen", max_tokens: 20, stream: false, messages: [{ role: "user", content: "hi" }] });
+    expect(lastUpstreamBody.chat_template_kwargs.enable_thinking).toBe(true);
+    delete process.env.ENABLE_THINKING;
   });
 });

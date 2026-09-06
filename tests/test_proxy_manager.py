@@ -107,6 +107,36 @@ def test_start_bun_passes_env_upstream_port(tmp_path):
     assert env["PORT"] == "8001"
 
 
+def test_start_bun_thinking_true_sets_enable_thinking_1(tmp_path):
+    pm = ProxyManager(
+        config_file=PROJECT_ROOT / "config" / "litellm.yaml",
+        port=8001, backend="bun", server_port=8082, thinking=True,
+        pid_file=tmp_path / "bun.pid", log_dir=tmp_path,
+    )
+    fake = MagicMock()
+    fake.pid = 7
+    fake.poll.return_value = None
+    with patch("subprocess.Popen", return_value=fake) as mock_popen:
+        pm.start()
+    env = mock_popen.call_args.kwargs.get("env") or mock_popen.call_args[1].get("env")
+    assert env["ENABLE_THINKING"] == "1"
+
+
+def test_start_bun_thinking_false_by_default(tmp_path):
+    pm = ProxyManager(
+        config_file=PROJECT_ROOT / "config" / "litellm.yaml",
+        port=8001, backend="bun", server_port=8082,
+        pid_file=tmp_path / "bun.pid", log_dir=tmp_path,
+    )
+    fake = MagicMock()
+    fake.pid = 7
+    fake.poll.return_value = None
+    with patch("subprocess.Popen", return_value=fake) as mock_popen:
+        pm.start()
+    env = mock_popen.call_args.kwargs.get("env") or mock_popen.call_args[1].get("env")
+    assert env["ENABLE_THINKING"] == "0"
+
+
 def test_backend_default_is_litellm(tmp_path):
     pm = ProxyManager(
         config_file=PROJECT_ROOT / "config" / "litellm.yaml",

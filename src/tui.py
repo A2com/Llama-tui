@@ -349,13 +349,17 @@ class LlamaTUI(App):
         _ensure_config()
         self._manager       = ServerManager(CONFIG_FILE)
         try:
-            self._proxy_backend = json.loads(CONFIG_FILE.read_text()).get("proxy_backend", "bun")
+            _cfg = json.loads(CONFIG_FILE.read_text())
+            self._proxy_backend = _cfg.get("proxy_backend", "bun")
+            self._thinking = _cfg.get("thinking", False)
         except Exception:
             self._proxy_backend = "bun"
+            self._thinking = False
         self._proxy         = ProxyManager(
             PROXY_ROOT, port=8001,
             backend=self._proxy_backend,
             server_port=self._manager._config.port,
+            thinking=self._thinking,
         )
         self._model_mgr     = ModelManager(models_dir=MODELS_DIR, config_file=CONFIG_FILE)
         self._task_profile_mgr = TaskProfileManager(profiles_file=TASK_PROFILES_FILE, project_root=PROJECT_ROOT)
@@ -644,21 +648,36 @@ class LlamaTUI(App):
 
     def _load_and_restart(self, path: Path) -> None:
         was_running = self._manager.status() == ServerStatus.RUNNING
+        proxy_was_running = self._proxy.status() == ProxyStatus.RUNNING
         self._log(f"[{self._ts()}] ⏏ Chargement → {path.stem}")
 
         if was_running:
             self._manager.stop()
             self._server_start_time = None
             self._log(f"[{self._ts()}] ■ Serveur arrêté pour changement de modèle")
+        if proxy_was_running:
+            self._proxy.stop()
 
         self._model_mgr.load(path)
         self._manager = ServerManager(CONFIG_FILE)
         self._stats = StatsCollector(port=self._manager._config.port)
+        try:
+            self._thinking = json.loads(CONFIG_FILE.read_text()).get("thinking", False)
+        except Exception:
+            self._thinking = False
+        self._proxy = ProxyManager(
+            PROXY_ROOT, port=8001,
+            backend=self._proxy_backend,
+            server_port=self._manager._config.port,
+            thinking=self._thinking,
+        )
         self._populate_model_list()
         self._log(f"[{self._ts()}] ✓ Modèle sélectionné : {path.stem}")
 
         if was_running:
             self.action_start_server()
+        if proxy_was_running:
+            self.action_start_proxy()
 
         self._refresh_ui()
 

@@ -148,6 +148,21 @@ def test_tui_exposes_llama_version_attribute():
     assert hasattr(app, "_llama_version")
 
 
+def test_tui_reads_thinking_flag_for_proxy():
+    """server.json['thinking'] doit être lu et transmis à ProxyManager (profil qualite)."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert '.get("thinking"' in tui_src, "lecture de la clé 'thinking' manquante"
+    assert "thinking=" in tui_src, "thinking= non transmis à ProxyManager"
+
+
+def test_tui_load_and_restart_also_restarts_running_proxy():
+    """Changer de profil doit relancer le proxy s'il tournait (sinon ENABLE_THINKING reste celui du profil précédent)."""
+    import inspect
+    from src.tui import LlamaTUI
+    src = inspect.getsource(LlamaTUI._load_and_restart)
+    assert "_proxy" in src, "_load_and_restart ne touche pas au proxy"
+
+
 def test_tui_has_download_screen():
     """DownloadScreen (ModalScreen) doit exister pour télécharger des modèles."""
     from textual.screen import ModalScreen

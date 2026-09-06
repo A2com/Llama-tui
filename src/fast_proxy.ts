@@ -11,6 +11,20 @@ export function mapModel(name: string): string {
   return aliases[name] || name;
 }
 
+function convertContent(content: any): any {
+  if (typeof content !== "string" && !Array.isArray(content)) return content;
+  if (typeof content === "string") return content;
+  return content.map((block: any) => {
+    if (block.type === "image" && block.source?.type === "base64") {
+      return {
+        type: "image_url",
+        image_url: { url: `data:${block.source.media_type};base64,${block.source.data}` },
+      };
+    }
+    return block;
+  });
+}
+
 export async function handleRequest(req: Request, upstreamBase: string = UPSTREAM): Promise<Response> {
   const url = new URL(req.url);
 
@@ -33,10 +47,10 @@ export async function handleRequest(req: Request, upstreamBase: string = UPSTREA
 
     const openaiMessages: any[] = [];
     if (anthropicBody.system) {
-      openaiMessages.push({ role: "system", content: anthropicBody.system });
+      openaiMessages.push({ role: "system", content: convertContent(anthropicBody.system) });
     }
     for (const msg of anthropicBody.messages) {
-      openaiMessages.push({ role: msg.role, content: msg.content });
+      openaiMessages.push({ role: msg.role, content: convertContent(msg.content) });
     }
 
     const wantStream = anthropicBody.stream ?? true;
@@ -46,7 +60,7 @@ export async function handleRequest(req: Request, upstreamBase: string = UPSTREA
       max_tokens: anthropicBody.max_tokens ?? 4096,
       temperature: anthropicBody.temperature ?? 0.7,
       stream: wantStream,
-      chat_template_kwargs: { enable_thinking: false },
+      chat_template_kwargs: { enable_thinking: process.env.ENABLE_THINKING === "1" },
     };
     if (process.env.REASONING_EFFORT) {
       openaiBody.reasoning_effort = process.env.REASONING_EFFORT;
@@ -65,7 +79,10 @@ export async function handleRequest(req: Request, upstreamBase: string = UPSTREA
         type: "message",
         role: "assistant",
         model: anthropicBody.model,
-        content: [{ type: "text", text: openaiResp.choices?.[0]?.message?.content ?? "" }],
+        content: [{
+          type: "text",
+          text: openaiResp.choices?.[0]?.message?.content || openaiResp.choices?.[0]?.message?.reasoning_content || "",
+        }],
         usage: openaiResp.usage,
       };
       return Response.json(anthropicResp);
