@@ -26,6 +26,7 @@ class ServerConfig:
     jinja: bool = True
     spec_type: Optional[str] = None
     spec_draft_n_max: Optional[int] = None
+    mmproj: Optional[str] = None
     _project_root: Path = field(default=Path("."), repr=False)
 
     @classmethod
@@ -67,15 +68,23 @@ class ServerConfig:
             jinja=jinja,
             spec_type=spec_type,
             spec_draft_n_max=spec_draft_n_max,
+            mmproj=data.get("mmproj"),
             _project_root=project_root,
         )
 
-    @property
-    def model_path(self) -> Path:
-        raw = Path(self.model)
+    def _resolve(self, raw_path: str) -> Path:
+        raw = Path(raw_path)
         if raw.is_absolute():
             return raw
         return self._project_root / raw
+
+    @property
+    def model_path(self) -> Path:
+        return self._resolve(self.model)
+
+    @property
+    def mmproj_path(self) -> Optional[Path]:
+        return self._resolve(self.mmproj) if self.mmproj is not None else None
 
     def to_cli_args(self) -> List[str]:
         args = [
@@ -100,4 +109,6 @@ class ServerConfig:
             args.extend(["--spec-type", self.spec_type])
         if self.spec_draft_n_max is not None:
             args.extend(["--spec-draft-n-max", str(self.spec_draft_n_max)])
+        if self.mmproj_path is not None:
+            args.extend(["--mmproj", str(self.mmproj_path)])
         return args

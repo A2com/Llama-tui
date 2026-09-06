@@ -266,3 +266,32 @@ def test_jinja_loaded_from_config(tmp_path):
     cfg_file.write_text(json.dumps({**BASE_CFG, "jinja": False}))
     config = ServerConfig.from_file(cfg_file)
     assert config.jinja is False
+
+
+def test_mmproj_absent_by_default(tmp_path):
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps(BASE_CFG))
+    config = ServerConfig.from_file(cfg_file)
+    assert config.mmproj is None
+    assert "--mmproj" not in config.to_cli_args()
+
+
+def test_mmproj_relative_path_resolved_and_emitted(tmp_path):
+    (tmp_path / "config").mkdir()
+    cfg_file = tmp_path / "config" / "server.json"
+    cfg_file.write_text(json.dumps({**BASE_CFG, "mmproj": "models/mmproj-F16.gguf"}))
+    config = ServerConfig.from_file(cfg_file)
+    args = config.to_cli_args()
+    assert "--mmproj" in args
+    idx = args.index("--mmproj")
+    assert args[idx + 1] == str(tmp_path / "models" / "mmproj-F16.gguf")
+
+
+def test_mmproj_absolute_path_passed_through(tmp_path):
+    (tmp_path / "config").mkdir()
+    cfg_file = tmp_path / "config" / "server.json"
+    cfg_file.write_text(json.dumps({**BASE_CFG, "mmproj": "/abs/mmproj-F16.gguf"}))
+    config = ServerConfig.from_file(cfg_file)
+    args = config.to_cli_args()
+    idx = args.index("--mmproj")
+    assert args[idx + 1] == "/abs/mmproj-F16.gguf"
