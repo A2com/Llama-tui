@@ -93,3 +93,15 @@ def test_activate_propagates_missing_model_file(tmp_path, model_mgr):
     mgr = TaskProfileManager(profiles_file=pf, project_root=tmp_path)
     with pytest.raises(FileNotFoundError):
         mgr.activate("ghost", model_mgr)
+
+
+# ── Repo réel : config/task-profiles.json ──────────────────────────────────
+
+def test_real_profiles_file_has_qualite_profile():
+    """Le profil 'qualite' doit pointer vers un .gguf existant dans models/."""
+    from src.tui import PROJECT_ROOT, TASK_PROFILES_FILE
+    mgr = TaskProfileManager(profiles_file=TASK_PROFILES_FILE, project_root=PROJECT_ROOT)
+    profiles = {p.name: p for p in mgr.list_profiles()}
+    assert "qualite" in profiles, "profil qualite manquant dans config/task-profiles.json"
+    assert profiles["qualite"].model_path.exists(), profiles["qualite"].model_path
+    assert profiles["qualite"].model_path.name == "Qwen3.8-27B-UD-Q4_K_M.gguf"
