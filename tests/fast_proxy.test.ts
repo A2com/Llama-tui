@@ -22,6 +22,12 @@ beforeAll(async () => {
       }
       const body = await req.json();
       lastUpstreamBody = body;
+      if (body.model === "qwen-upstream-error") {
+        return Response.json(
+          { error: { code: 500, message: "Jinja Exception: System message must be at the beginning.", type: "server_error" } },
+          { status: 500 }
+        );
+      }
       const emptyContent = body.model === "qwen-reasoning-empty";
       const openaiResp = {
         id: "chatcmpl-test",
@@ -178,5 +184,31 @@ describe("fast_proxy /v1/messages", () => {
     await callProxy({ model: "qwen", max_tokens: 20, stream: false, messages: [{ role: "user", content: "hi" }] });
     expect(lastUpstreamBody.chat_template_kwargs.enable_thinking).toBe(true);
     delete process.env.ENABLE_THINKING;
+  });
+
+  test("message role=system en fin de tableau → fusionné dans le system prompt amont, jamais orphelin", async () => {
+    lastUpstreamBody = null;
+    await callProxy({
+      model: "qwen", max_tokens: 20, stream: false,
+      messages: [
+        { role: "user", content: "hi" },
+        { role: "system", content: "reminder contextuel" },
+      ],
+    });
+    const roles = lastUpstreamBody.messages.map((m: any) => m.role);
+    expect(roles.filter((r: string) => r === "system").length).toBeLessThanOrEqual(1);
+    if (roles.includes("system")) {
+      expect(roles[0]).toBe("system");
+    }
+  });
+
+  test("upstream 500 en stream → erreur propagée, jamais un succès vide", async () => {
+    const res = await callProxy({ model: "qwen-upstream-error", max_tokens: 20, stream: true, messages: [{ role: "user", content: "hi" }] });
+    expect(res.status).not.toBe(200);
+  });
+
+  test("upstream 500 en non-stream → erreur propagée, pas de content vide silencieux", async () => {
+    const res = await callProxy({ model: "qwen-upstream-error", max_tokens: 20, stream: false, messages: [{ role: "user", content: "hi" }] });
+    expect(res.status).not.toBe(200);
   });
 });

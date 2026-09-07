@@ -45,12 +45,29 @@ export async function handleRequest(req: Request, upstreamBase: string = UPSTREA
   if (req.method === "POST" && url.pathname === "/v1/messages") {
     const anthropicBody = await req.json();
 
-    const openaiMessages: any[] = [];
+    const systemParts: any[] = [];
     if (anthropicBody.system) {
-      openaiMessages.push({ role: "system", content: convertContent(anthropicBody.system) });
+      const converted = convertContent(anthropicBody.system);
+      if (Array.isArray(converted)) systemParts.push(...converted);
+      else systemParts.push(converted);
     }
+
+    const openaiMessages: any[] = [];
     for (const msg of anthropicBody.messages) {
+      if (msg.role === "system" || msg.role === "developer") {
+        const converted = convertContent(msg.content);
+        if (Array.isArray(converted)) systemParts.push(...converted);
+        else systemParts.push(converted);
+        continue;
+      }
       openaiMessages.push({ role: msg.role, content: convertContent(msg.content) });
+    }
+
+    if (systemParts.length > 0) {
+      const systemContent = systemParts.length === 1 && typeof systemParts[0] === "string"
+        ? systemParts[0]
+        : systemParts;
+      openaiMessages.unshift({ role: "system", content: systemContent });
     }
 
     const wantStream = anthropicBody.stream ?? true;
@@ -71,6 +88,11 @@ export async function handleRequest(req: Request, upstreamBase: string = UPSTREA
       headers: { "Content-Type": "application/json", Authorization: "Bearer fake" },
       body: JSON.stringify(openaiBody),
     });
+
+    if (!upstream.ok) {
+      const errText = await upstream.text();
+      return new Response(errText, { status: upstream.status, headers: { "Content-Type": "application/json" } });
+    }
 
     if (!wantStream) {
       const openaiResp = await upstream.json();
