@@ -2,7 +2,7 @@
 
 **Date** : 2026-09-25 · **Repo** : `/Volumes/Twoa Files/Git/llama.cpp` · **Branche** : `main`
 **Méthode** : TDD strict (rouge → vert) · **Palette** : Catppuccin Mocha
-**Statut** : en cours d'exécution
+**Statut** : ✅ exécuté (voir « Résultat » en fin)
 
 ## Contexte
 
@@ -77,3 +77,22 @@ action-bar unique (LLM à gauche, proxy/logs à droite), sidebar en cartes visue
 
 4 commits, ~200 tests verts (pytest + bun), TUI sans monitor, UI catppuccin dashboard,
 graphiques labellisés + Digits + ProgressBar ctx, backup tar + bundle dans `~/backups/`.
+
+## Résultat (2026-09-25)
+
+| Commit | Hash | Contenu |
+|---|---|---|
+| 1 | `a87c7c6` | fixes bugs TDD (thinking + rollback sidecar) + PLAN-FONCTIONNEL.md |
+| 2 | `2d63d25` | docs plan UI redesign |
+| 3 | `b14a512` | suppression llama-monitor (9 zones tui.py, 4 tests, preset json, README/CLAUDE.md) |
+| 4 | `d3caed1` | dashboard catppuccin-mocha, action-bar unique (2 barres fusionnées) |
+| 5 | `68c90c6` | stats visuals : Digits tps géant, sparklines labellisées h4/h3, ProgressBar ctx |
+
+**Tests finaux** : 203 pytest + 15 bun au vert. Nouveaux tests TDD : `test_tui_monitor_fully_removed`,
+`test_tui_single_action_bar`, `test_tui_palette_is_catppuccin`,
+`test_cache_history_not_polluted_when_idle`, `test_cache_history_records_final_value_on_generation_end`,
+tests structure (labels sparklines, Digits, ProgressBar, style).
+
+**Smoke réel** : `run_test()` 120×40 → structure OK, Digits « 23.7 », ProgressBar 0.4 %, sparklines
+alimentées [23.7, 24.1] / [87.0], screenshot SVG validé (palette catppuccin présente) → `Docs/tui-screenshot.svg`.
+Backups : `~/backups/llama-tui-20260925-1158.tar.gz` + `~/backups/llama-tui-history.bundle`.
