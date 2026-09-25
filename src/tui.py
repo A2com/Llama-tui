@@ -12,7 +12,7 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input, TabbedContent, TabPane
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input, TabbedContent, TabPane, Digits, ProgressBar
 
 from src.model_manager import ModelManager
 from src.proxy_manager import ProxyManager, ProxyStatus
@@ -306,12 +306,21 @@ class LlamaTUI(App):
     #stats-grid Label { margin-bottom: 0; }
     #lbl-tps { color: #fab387; text-style: bold; }
     #lbl-tps-secondary { color: #9399b2; }
-    #sparkline-tps { height: 2; }
-    #sparkline-tps > .sparkline--max-color { color: #fab387; }
+    #sparkline-tps { height: 4; }
+    #sparkline-tps > .sparkline--max-color { color: #89b4fa; }
     #sparkline-tps > .sparkline--min-color { color: #6c7086; }
-    #sparkline-cache { height: 2; }
+    #sparkline-cache { height: 3; }
     #sparkline-cache > .sparkline--max-color { color: #a6e3a1; }
     #sparkline-cache > .sparkline--min-color { color: #6c7086; }
+    #digits-tps {
+        color: #a6e3a1;
+        background: #181825;
+        width: auto;
+        text-style: bold;
+    }
+    #progress-ctx { color: #89b4fa; margin-top: 1; }
+    #lbl-spark-tps { color: #89b4fa; text-style: bold; margin-top: 1; }
+    #lbl-spark-cache { color: #a6e3a1; text-style: bold; margin-top: 1; }
     #tab-slots { padding: 0 1; }
     #lbl-slots { color: #cdd6f4; }
     """
@@ -405,10 +414,13 @@ class LlamaTUI(App):
                 with TabPane("Stats", id="tab-stats"):
                     with Vertical(id="stats-panel"):
                         yield Static("▪ Performance", classes="section")
+                        yield Digits("  —", id="digits-tps")
                         yield Label("", id="lbl-tps-secondary")
-                        yield Label("— t/s", id="lbl-tps")
+                        yield Static("⚡ tokens/s", classes="section", id="lbl-spark-tps")
                         yield Sparkline([], id="sparkline-tps", summary_function=max)
+                        yield Static("Cache %", classes="section", id="lbl-spark-cache")
                         yield Sparkline([], id="sparkline-cache", summary_function=max)
+                        yield ProgressBar(total=100.0, show_eta=False, id="progress-ctx")
                 with TabPane("Slots", id="tab-slots"):
                     yield Static("▪ Slots", classes="section")
                     yield Static("─" * 40, classes="divider")
@@ -568,12 +580,13 @@ class LlamaTUI(App):
         s = self._stats.last_stats
         history = list(self._stats.history)
         if s.is_generating and s.gen_tps is not None:
-            primary = f"⚡ {s.gen_tps:.1f} t/s"
+            tps_val = s.gen_tps
         elif history:
-            primary = f"[dim]dernier : {history[-1]:.1f} t/s[/dim]"
+            tps_val = history[-1]
         else:
-            primary = "— t/s"
-        self.query_one("#lbl-tps", Label).update(primary)
+            tps_val = None
+        digits = self.query_one("#digits-tps", Digits)
+        digits.update(f"{tps_val:.1f}" if tps_val else " —")
 
         avg = f"{s.avg_tps:.1f}" if s.avg_tps else "—"
         peak = f"{s.peak_tps:.1f}" if s.peak_tps else "—"
@@ -588,6 +601,12 @@ class LlamaTUI(App):
         self.query_one("#sparkline-tps", Sparkline).data = history or [0.0]
         cache_hist = list(self._stats.cache_history)
         self.query_one("#sparkline-cache", Sparkline).data = cache_hist or [0.0]
+
+        progress = self.query_one("#progress-ctx", ProgressBar)
+        if s.ctx_used_pct is not None:
+            progress.update(total=100.0, progress=min(max(s.ctx_used_pct, 0.0), 100.0))
+        else:
+            progress.update(progress=0.0)
 
         proc = "● processing" if s.is_generating else "○ idle"
         cache_pct = f"{s.cache_hit_ratio*100:.0f}%" if s.cache_hit_ratio is not None else "—"

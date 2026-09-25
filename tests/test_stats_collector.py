@@ -161,3 +161,31 @@ def test_total_generated_accumulates_across_generations(collector):
          patch("time.monotonic", return_value=t0 + 1.5):
         stats = collector.poll()
     assert stats.total_generated >= 20
+
+
+def test_cache_history_not_polluted_when_idle(collector):
+    """Idle sans génération → cache_history ne reçoit pas de points à 0%."""
+    with patch("httpx.get", return_value=_mock_slot(False, 0, n_prompt=10, n_cached=2)):
+        collector.poll()
+    with patch("httpx.get", return_value=_mock_slot(False, 0)):
+        collector.poll()
+    with patch("httpx.get", return_value=_mock_slot(False, 0)):
+        collector.poll()
+    assert len(collector.cache_history) == 0, (
+        f"cache_history polluée en idle: {list(collector.cache_history)}")
+
+
+def test_cache_history_records_final_value_on_generation_end(collector):
+    """Fin de génération : le dernier cache % est archivé une seule fois."""
+    with patch("httpx.get", return_value=_mock_slot(False, 0)):
+        collector.poll()
+    # génération avec prompt partiellement caché
+    with patch("httpx.get", return_value=_mock_slot(True, 10, n_ctx=1000, n_prompt=100, n_cached=50)):
+        collector.poll()
+    # fin de génération
+    with patch("httpx.get", return_value=_mock_slot(False, 0, n_ctx=1000, n_prompt=100, n_cached=50)):
+        stats = collector.poll()
+    with patch("httpx.get", return_value=_mock_slot(False, 0)):
+        collector.poll()
+    vals = list(collector.cache_history)
+    assert len(vals) == 2, f"attendu 2 points (gén + fin), obtenu {vals}"

@@ -42,6 +42,7 @@ class StatsCollector:
         self.last_stats = TokenStats()
         self.history: deque[float] = deque(maxlen=self.MAX_HISTORY)
         self.cache_history: deque[float] = deque(maxlen=self.MAX_HISTORY)
+        self._last_was_generating: bool = False
 
     def poll(self) -> TokenStats:
         try:
@@ -60,8 +61,16 @@ class StatsCollector:
         n_cached = slot.get("n_prompt_tokens_cache", 0)
         processed = n_prompt + n_cached
         cache_pct = (n_cached / processed * 100.0) if processed > 0 else 0.0
-        self.cache_history.append(cache_pct)
         now = time.monotonic()
+
+        # Archivage cache : uniquement pendant la génération, ou un seul point
+        # final à la transition génér→idle (jamais pendant l'idle prolongé).
+        was_generating = self._last_was_generating
+        if is_processing:
+            self.cache_history.append(cache_pct)
+        elif was_generating:
+            self.cache_history.append(cache_pct)
+        self._last_was_generating = is_processing
 
         avg_tps = sum(self.history) / len(self.history) if self.history else None
         peak_tps = max(self.history) if self.history else None

@@ -410,3 +410,44 @@ def test_tui_sync_cline_never_raises(monkeypatch, tmp_path):
     )
     tui.LlamaTUI._sync_cline(fake)
     assert any("Cline" in m for m in logs)
+
+
+def test_stats_has_labeled_sparklines():
+    """Chaque sparkline a un label au-dessus."""
+    from src.tui import LlamaTUI
+    import inspect
+    compose_src = inspect.getsource(LlamaTUI.compose)
+    assert 'id="lbl-spark-tps"' in compose_src, "label sparkline tps manquant"
+    assert 'id="lbl-spark-cache"' in compose_src, "label sparkline cache manquant"
+
+
+def test_stats_has_digits_tps():
+    """Le t/s instantané utilise le widget Digits (compteur géant)."""
+    from src.tui import LlamaTUI
+    import inspect
+    compose_src = inspect.getsource(LlamaTUI.compose)
+    assert 'id="digits-tps"' in compose_src, "Digits tps manquant"
+    assert "Digits" in compose_src
+
+
+def test_stats_has_ctx_progressbar():
+    """Le taux d'occupation du contexte a une ProgressBar."""
+    from src.tui import LlamaTUI
+    import inspect
+    compose_src = inspect.getsource(LlamaTUI.compose)
+    assert 'id="progress-ctx"' in compose_src, "ProgressBar ctx manquante"
+    assert "ProgressBar" in compose_src
+
+
+def test_stats_sparkline_style_upgraded():
+    """Sparklines plus grandes + couleurs catppuccin."""
+    css = LlamaTUI_CSS()
+    assert "height: 4" in css, "sparkline tps pas agrandie"
+    assert "height: 3" in css, "sparkline cache pas agrandie"
+    assert "#89b4fa" in css, "bleu catppuccin absent des sparklines"
+    assert "#fd971f" not in css, "orange Monokai encore dans les sparklines"
+
+
+def LlamaTUI_CSS():
+    from src.tui import LlamaTUI
+    return LlamaTUI.CSS
