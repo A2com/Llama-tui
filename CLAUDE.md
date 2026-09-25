@@ -39,6 +39,7 @@ pytest tests/test_server_manager.py::test_start_returns_pid
 | `LLAMA_TUI_MONITOR_PORT` | `7778` | llama-monitor web port |
 | `LLAMA_TUI_MONITOR_PRESETS` | `PROJECT_ROOT/config/llama-monitor-presets.json` | monitor presets file |
 | `LLAMA_TUI_TASK_PROFILES` | `PROJECT_ROOT/config/task-profiles.json` | named model-switch profiles (e.g. vitesse/qualite) |
+| `LLAMA_TUI_CLINE_DIR` | `~/.cline/data/settings` | Cline settings dir synced by the TUI (`models.json`, `providers.json`) |
 
 ## Architecture
 
@@ -49,6 +50,7 @@ src/
   proxy_manager.py   # ProxyManager: subprocess lifecycle for litellm / Bun backend (start/stop/status/health)
   model_manager.py   # ModelManager: scans models/, rewrites config/server.json to switch models, hf download
   stats_collector.py # StatsCollector: polls llama-server /slots for live tokens/sec and cache history
+  cline_config.py    # sync_cline_models(): one Cline model entry per task profile (vision/reasoning/ctx from sidecar), active model written to providers.json
   tui_model.py       # StatusModel + LogBuffer: pure state containers (no I/O)
   tui.py             # LlamaTUI(App): Textual app, composes everything, 0.5s poll loop via thread
   version.py         # current_version_string()/check_version(): parses `llama-server --version` (build# or semver)
@@ -79,7 +81,7 @@ src/
 | `p` | Start proxy |
 | `o` | Stop proxy |
 | `b` | Switch proxy backend (bun ↔ litellm) |
-| `t` | Switch task profile (vitesse/qualite) |
+| `t` | Switch task profile (vitesse/qualite/uncensored) |
 | `a` | Start all |
 | `z` | Stop all |
 | `n` | Download model from HuggingFace |

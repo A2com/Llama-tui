@@ -60,3 +60,19 @@ def test_check_version_true_on_semver_regardless_of_min(monkeypatch):
     with patch("subprocess.check_output", return_value="version: 0.4.0 (abc1234)\nbuilt with AppleClang"):
         assert version.check_version(10310) is True
         assert version.check_version(99999) is True
+
+# ── Version litellm ──────────────────────────────────────────────────────────
+
+def test_litellm_version_string_parses(monkeypatch):
+    with patch("subprocess.check_output", return_value="LiteLLM: Current Version = 1.85.0\n"):
+        assert version.litellm_version_string() == "1.85.0"
+
+
+def test_litellm_version_string_none_on_missing_binary(monkeypatch):
+    with patch("subprocess.check_output", side_effect=FileNotFoundError("no binary")):
+        assert version.litellm_version_string() is None
+
+
+def test_litellm_version_string_none_on_unparseable(monkeypatch):
+    with patch("subprocess.check_output", return_value="garbage without version"):
+        assert version.litellm_version_string() is None

@@ -17,10 +17,11 @@ from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Spar
 from src.model_manager import ModelManager
 from src.proxy_manager import ProxyManager, ProxyStatus
 from src.server_manager import ServerManager, ServerStatus
+from src.cline_config import sync_cline_models
 from src.stats_collector import StatsCollector
 from src.task_profiles import TaskProfileError, TaskProfileManager
 from src.tui_model import LogBuffer, StatusModel
-from src.version import current_version_string
+from src.version import current_version_string, litellm_version_string
 
 PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE  = Path(os.environ.get("LLAMA_TUI_CONFIG", PROJECT_ROOT / "config" / "server.json"))
@@ -30,9 +31,14 @@ LLAMA_MONITOR_BIN = Path(os.environ.get("LLAMA_TUI_MONITOR_BIN", Path.home() / "
 LLAMA_MONITOR_PORT = int(os.environ.get("LLAMA_TUI_MONITOR_PORT", 7778))
 LLAMA_MONITOR_PRESETS = Path(os.environ.get("LLAMA_TUI_MONITOR_PRESETS", PROJECT_ROOT / "config" / "llama-monitor-presets.json"))
 TASK_PROFILES_FILE = Path(os.environ.get("LLAMA_TUI_TASK_PROFILES", PROJECT_ROOT / "config" / "task-profiles.json"))
+CLINE_SETTINGS_DIR = Path(os.environ.get("LLAMA_TUI_CLINE_DIR", Path.home() / ".cline" / "data" / "settings"))
 
 
 DEFAULT_MODEL = "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf"
+
+# Monokai — styles Rich inline (les tags [running]/[badge-ok] n'existent pas côté Rich)
+_CLR_OK = "#a6e22e"
+_CLR_KO = "#f92672"
 
 
 def _port_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -106,8 +112,7 @@ class HelpScreen(ModalScreen):
             ("m", "Démarre llama-monitor"),
             ("n", "Télécharge un modèle (HF)"),
             ("b", "Bascule backend proxy (bun↔litellm)"),
-            ("t", "Profil de tâche (vitesse/qualité)"),
-            ("/", "Filtre les modèles par nom"),
+            ("t", "Profil de tâche (vitesse/qualité/uncensored)"),
             ("Tab", "Focus liste modèles"),
             ("?", "Affiche cette aide"),
             ("Ctrl+Q", "Quitte"),
@@ -217,8 +222,6 @@ class LlamaTUI(App):
         padding: 0 1;
         text-style: bold;
     }
-    #status-bar .badge-ok    { color: $success; }
-    #status-bar .badge-ko    { color: $error; }
     #status-bar .sep         { color: $surface-lighten-1; }
 
     #main  { height: 1fr; layout: horizontal; }
@@ -231,14 +234,6 @@ class LlamaTUI(App):
     }
     #model-panel .section  { color: $text; text-style: bold; }
     #model-panel .divider  { color: $surface-lighten-1; }
-    #model-filter {
-        height: 1;
-        margin: 0 0 1 0;
-        border: solid $surface-lighten-1;
-        padding: 0 1;
-        color: $text-muted;
-    }
-    #model-filter:focus { border: solid $primary; color: $text; }
     #model-list { height: 1fr; }
     ListView { background: $surface; border: none; }
     ListItem { padding: 0 1; }
@@ -293,8 +288,6 @@ class LlamaTUI(App):
     .Button--primary:hover   { color: #8ce8f5; }
     .Button--primary:disabled { color: #2e5a6a; }
 
-    .running  { color: $success; }
-    .stopped  { color: $error; }
     .section  { color: $text; text-style: bold; }
     .divider  { color: $surface-lighten-1; }
     .hint     { color: $text-muted; text-style: italic; }
@@ -338,7 +331,6 @@ class LlamaTUI(App):
         Binding("b",      "switch_proxy_backend", "Proxy backend"),
         Binding("t",      "task_profile",   "Profil tâche"),
         Binding("?",      "help",           "Aide", show=True),
-        Binding("slash",  "focus_filter",   "Filtre", show=True),
         Binding("tab",    "focus_models",   "Focus modèles", show=False),
         Binding("ctrl+q", "quit",           "Quitter"),
     ]
@@ -367,10 +359,17 @@ class LlamaTUI(App):
         self._logs          = LogBuffer(max_lines=500)
         self._stats         = StatsCollector(port=self._manager._config.port)
         self._llama_version = current_version_string()
+        self._litellm_version: str | None = None
+        threading.Thread(target=self._load_litellm_version, daemon=True).start()
         self._server_start_time: float | None = None
         self._poll_thread: threading.Thread | None = None
         self._running       = True
-        self._filter        = ""
+
+    def _load_litellm_version(self) -> None:
+        # litellm --version = ~2.3 s (imports) → thread, jamais dans la boucle de poll
+        v = litellm_version_string()
+        if v:
+            self._litellm_version = v
 
     # ── Layout ────────────────────────────────────────────────────────────
 
@@ -380,7 +379,6 @@ class LlamaTUI(App):
             with Vertical(id="model-panel"):
                 yield Static("▪ Modèles", classes="section")
                 yield Static("─" * 30, classes="divider")
-                yield Input(placeholder="/ filtrer par nom…", id="model-filter")
                 yield ListView(id="model-list")
             with Vertical(id="sidebar"):
                 yield Static("▪ llama-server", classes="section")
@@ -402,6 +400,7 @@ class LlamaTUI(App):
                 yield Label("", id="lbl-proxy-port")
                 yield Label("", id="lbl-proxy-health")
                 yield Label("", id="lbl-proxy-backend")
+                yield Label("", id="lbl-litellm-version")
                 yield Static(" ", classes="divider")
                 yield Static("▪ llama-monitor", classes="section")
                 yield Static("─" * 26, classes="divider")
@@ -439,6 +438,7 @@ class LlamaTUI(App):
 
     def on_mount(self) -> None:
         self._populate_model_list()
+        self._sync_cline()
         self._refresh_ui()
         self._poll_thread = threading.Thread(target=self._poll_loop, daemon=True)
         self._poll_thread.start()
@@ -471,9 +471,6 @@ class LlamaTUI(App):
         lv.clear()
         active = self._model_mgr.active_model
         models = self._model_mgr.scan()
-        flt = self._filter.lower()
-        if flt:
-            models = [m for m in models if flt in m.name.lower()]
         for info in models:
             is_active = info.path == active
             size_str = f"{info.size_gb:.1f}GB" if info.size_gb >= 0.1 else f"{info.size_gb*1024:.0f}MB"
@@ -485,24 +482,15 @@ class LlamaTUI(App):
                 item.add_class("active-model")
             lv.append(item)
         if not models:
-            lv.append(ListItem(Label("  Aucun modèle" + (" correspondant" if flt else " trouvé"))))
+            lv.append(ListItem(Label("  Aucun modèle trouvé")))
 
     def _selected_model_path(self) -> Path | None:
         lv      = self.query_one("#model-list", ListView)
         idx     = lv.index
         models  = self._model_mgr.scan()
-        flt = self._filter.lower()
-        if flt:
-            models = [m for m in models if flt in m.name.lower()]
         if idx is None or idx >= len(models):
             return None
         return models[idx].path
-
-    def on_input_submitted(self, event: Input.Submitted) -> None:
-        if event.input.id == "model-filter":
-            self._filter = event.value.strip()
-            self._populate_model_list()
-            self.query_one("#model-list", ListView).focus()
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
@@ -521,8 +509,8 @@ class LlamaTUI(App):
         model_name = Path(info["model"]).stem if info["model"] else "—"
         s = self._stats.last_stats
         tps = f"⚡ {s.gen_tps:.1f} t/s" if (s.is_generating and s.gen_tps) else "idle"
-        badge = "[badge-ok]● RUNNING[/badge-ok]" if srv_up else "[badge-ko]● STOPPED[/badge-ko]"
-        pbadge = "[badge-ok]●[/badge-ok]" if proxy_up else "[badge-ko]○[/badge-ko]"
+        badge = f"[bold {_CLR_OK}]● RUNNING[/]" if srv_up else f"[bold {_CLR_KO}]● STOPPED[/]"
+        pbadge = f"[bold {_CLR_OK}]●[/]" if proxy_up else f"[bold {_CLR_KO}]○[/]"
         bar = (
             f"{badge}  [sep]│[/sep]  {model_name}  [sep]│[/sep]  {tps}  "
             f"[sep]│[/sep]  up {self._status_model.uptime_str}  [sep]│[/sep]  proxy {pbadge}"
@@ -532,13 +520,12 @@ class LlamaTUI(App):
     def _refresh_server(self) -> None:
         info       = self._manager.get_info()
         is_running = self._status_model.is_running
-        cls        = "running" if is_running else "stopped"
-        lbl        = "● RUNNING" if is_running else "● STOPPED"
+        lbl        = f"[bold {_CLR_OK}]● RUNNING[/]" if is_running else f"[bold {_CLR_KO}]● STOPPED[/]"
         model_name = Path(info["model"]).stem if info["model"] else "—"
         health     = self._manager.health_check()
 
         self.query_one("#lbl-status", Label).update(
-            f"[bold]Status:[/bold] [{cls}]{lbl}[/{cls}]")
+            f"[bold]Status:[/bold] {lbl}")
         self.query_one("#lbl-pid",    Label).update(
             f"[bold]PID:[/bold]    {info['pid'] or '—'}")
         self.query_one("#lbl-uptime", Label).update(
@@ -552,8 +539,8 @@ class LlamaTUI(App):
         self.query_one("#lbl-gpu",    Label).update(
             f"[bold]GPU:[/bold]    {info['n_gpu_layers']} layers (Metal)")
         self.query_one("#lbl-health", Label).update(
-            f"[bold]Health:[/bold] [{'running' if health else 'stopped'}]"
-            f"{'✓ OK' if health else '✗ N/A'}[/{'running' if health else 'stopped'}]")
+            f"[bold]Health:[/bold] "
+            f"[bold {_CLR_OK}]✓ OK[/]" if health else f"[bold]Health:[/bold] [bold {_CLR_KO}]✗ N/A[/]")
         self.query_one("#lbl-llama-version", Label).update(
             f"[bold]llama.cpp:[/bold] {self._llama_version or '—'}")
 
@@ -564,31 +551,32 @@ class LlamaTUI(App):
     def _refresh_proxy(self) -> None:
         info       = self._proxy.get_info()
         is_running = info["status"] == "running"
-        cls        = "running" if is_running else "stopped"
-        lbl        = "● RUNNING" if is_running else "● STOPPED"
+        lbl        = f"[bold {_CLR_OK}]● RUNNING[/]" if is_running else f"[bold {_CLR_KO}]● STOPPED[/]"
         health     = self._proxy.health_check()
 
         self.query_one("#lbl-proxy-status", Label).update(
-            f"[bold]Status:[/bold] [{cls}]{lbl}[/{cls}]")
+            f"[bold]Status:[/bold] {lbl}")
         self.query_one("#lbl-proxy-pid",    Label).update(
             f"[bold]PID:[/bold]    {info['pid'] or '—'}")
         self.query_one("#lbl-proxy-port",   Label).update(
             f"[bold]Port:[/bold]   :{info['port']} → Claude Code")
         self.query_one("#lbl-proxy-health", Label).update(
-            f"[bold]Health:[/bold] [{'running' if health else 'stopped'}]"
-            f"{'✓ OK' if health else '✗ N/A'}[/{'running' if health else 'stopped'}]")
+            f"[bold]Health:[/bold] "
+            f"[bold {_CLR_OK}]✓ OK[/]" if health else f"[bold]Health:[/bold] [bold {_CLR_KO}]✗ N/A[/]")
         self.query_one("#lbl-proxy-backend", Label).update(
             f"[bold]Backend:[/bold] {self._proxy_backend}")
+        self.query_one("#lbl-litellm-version", Label).update(
+            f"[bold]Version:[/bold] {self._litellm_version or '—'}")
 
         self.query_one("#btn-proxy-start", Button).disabled = is_running
         self.query_one("#btn-proxy-stop",  Button).disabled = not is_running
 
     def _refresh_monitor(self) -> None:
         up = _port_open(LLAMA_MONITOR_PORT)
-        cls = "running" if up else "stopped"
         sym = "●" if up else "○"
+        color = _CLR_OK if up else _CLR_KO
         self.query_one("#lbl-monitor-status", Label).update(
-            f"[bold]Monitor:[/bold] [{cls}]{sym} :{LLAMA_MONITOR_PORT}[/{cls}]")
+            f"[bold]Monitor:[/bold] [bold {color}]{sym} :{LLAMA_MONITOR_PORT}[/]")
 
     def _refresh_stats(self) -> None:
         s = self._stats.last_stats
@@ -633,9 +621,6 @@ class LlamaTUI(App):
     def action_help(self) -> None:
         self.push_screen(HelpScreen())
 
-    def action_focus_filter(self) -> None:
-        self.query_one("#model-filter", Input).focus()
-
     def action_load_model(self) -> None:
         path = self._selected_model_path()
         if path is None:
@@ -658,7 +643,13 @@ class LlamaTUI(App):
         if proxy_was_running:
             self._proxy.stop()
 
-        self._model_mgr.load(path)
+        try:
+            self._model_mgr.load(path)
+        except Exception as e:
+            self._log(f"[{self._ts()}] ✗ Chargement impossible : {e}")
+            self._log(f"[{self._ts()}] ⤴ Ancienne config conservée — serveur NON relancé")
+            self._refresh_ui()
+            return
         self._manager = ServerManager(CONFIG_FILE)
         self._stats = StatsCollector(port=self._manager._config.port)
         try:
@@ -672,6 +663,7 @@ class LlamaTUI(App):
             thinking=self._thinking,
         )
         self._populate_model_list()
+        self._sync_cline()
         self._log(f"[{self._ts()}] ✓ Modèle sélectionné : {path.stem}")
 
         if was_running:
@@ -680,6 +672,16 @@ class LlamaTUI(App):
             self.action_start_proxy()
 
         self._refresh_ui()
+
+    def _sync_cline(self) -> None:
+        try:
+            sync_cline_models(
+                TASK_PROFILES_FILE, PROJECT_ROOT, CLINE_SETTINGS_DIR,
+                active_model=self._model_mgr.active_model,
+                base_url=f"http://localhost:{self._manager._config.port}/v1",
+            )
+        except Exception as e:
+            self._log(f"[{self._ts()}] ⚠ Sync Cline : {e}")
 
     def action_task_profile(self) -> None:
         try:
@@ -762,7 +764,8 @@ class LlamaTUI(App):
         self._proxy_backend = new_backend
         self._proxy = ProxyManager(
             PROXY_ROOT, port=8001,
-            backend=new_backend, server_port=self._manager._config.port)
+            backend=new_backend, server_port=self._manager._config.port,
+            thinking=self._thinking)
         self._log(f"[{self._ts()}] ⤢ Proxy backend → {new_backend}")
         if was_running:
             self.action_start_proxy()

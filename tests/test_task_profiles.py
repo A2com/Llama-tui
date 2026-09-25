@@ -105,3 +105,18 @@ def test_real_profiles_file_has_qualite_profile():
     assert "qualite" in profiles, "profil qualite manquant dans config/task-profiles.json"
     assert profiles["qualite"].model_path.exists(), profiles["qualite"].model_path
     assert profiles["qualite"].model_path.name == "Qwen3.8-27B-UD-Q4_K_M.gguf"
+
+
+def test_real_profiles_file_has_uncensored_profile():
+    """Le profil 'uncensored' doit pointer vers un .gguf existant, avec sidecar vision sans MTP."""
+    import json
+    from src.tui import PROJECT_ROOT, TASK_PROFILES_FILE
+    mgr = TaskProfileManager(profiles_file=TASK_PROFILES_FILE, project_root=PROJECT_ROOT)
+    profiles = {p.name: p for p in mgr.list_profiles()}
+    assert "uncensored" in profiles, "profil uncensored manquant dans config/task-profiles.json"
+    model = profiles["uncensored"].model_path
+    assert model.exists(), model
+    assert model.name == "Qwen3.6-35B-A3B-Uncensored-HauhauCS-Aggressive-Q4_K_M.gguf"
+    sidecar = json.loads(model.with_suffix(".json").read_text())
+    assert (PROJECT_ROOT / sidecar["mmproj"]).exists()
+    assert "spec_type" not in sidecar

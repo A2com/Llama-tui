@@ -238,3 +238,39 @@ def test_load_sidecar_without_spec_type_keeps_filename_heuristic(manager, models
     saved = json.loads(config_file.read_text())
     assert saved["spec_type"] == "draft-mtp"
     assert saved["spec_draft_n_max"] == 2
+
+
+# ── Purge champs model-specific au switch (mmproj, thinking, ctx, cache) ─────
+
+def test_load_purges_mmproj_when_new_model_has_none(manager, models_dir, config_file):
+    (models_dir / "vision.gguf").write_bytes(b"x" * 1024)
+    (models_dir / "vision.json").write_text(json.dumps({"mmproj": "models/mmproj.gguf", "thinking": True}))
+    manager.load(models_dir / "vision.gguf")
+
+    (models_dir / "plain.gguf").write_bytes(b"x" * 1024)
+    manager.load(models_dir / "plain.gguf")
+    saved = json.loads(config_file.read_text())
+    assert "mmproj" not in saved
+    assert "thinking" not in saved
+
+
+def test_load_resets_ctx_and_cache_to_baseline_when_new_model_has_none(manager, models_dir, config_file):
+    (models_dir / "vision.gguf").write_bytes(b"x" * 1024)
+    (models_dir / "vision.json").write_text(json.dumps({"ctx_size": 262144, "cache_type_k": "f16", "cache_type_v": "f16"}))
+    manager.load(models_dir / "vision.gguf")
+
+    (models_dir / "plain.gguf").write_bytes(b"x" * 1024)
+    manager.load(models_dir / "plain.gguf")
+    saved = json.loads(config_file.read_text())
+    assert saved["ctx_size"] == 131072
+    assert saved["cache_type_k"] == "q4_0"
+    assert saved["cache_type_v"] == "q4_0"
+
+
+def test_load_sidecar_overrides_win_after_purge(manager, models_dir, config_file):
+    (models_dir / "big.gguf").write_bytes(b"x" * 1024)
+    (models_dir / "big.json").write_text(json.dumps({"ctx_size": 262144, "mmproj": "models/m.gguf"}))
+    manager.load(models_dir / "big.gguf")
+    saved = json.loads(config_file.read_text())
+    assert saved["ctx_size"] == 262144
+    assert saved["mmproj"] == "models/m.gguf"

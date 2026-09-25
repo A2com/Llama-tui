@@ -3,6 +3,7 @@ import re
 import subprocess
 
 _VERSION_RE = re.compile(r"version:\s*(\S+)")
+_LITELLM_VERSION_RE = re.compile(r"Current Version = (\S+)")
 
 
 def _server_binary() -> str:
@@ -36,3 +37,16 @@ def check_version(min_version: int) -> bool:
         return int(v) >= min_version
     # semver build (e.g. "0.4.0") supersedes any legacy build-number scheme
     return True
+
+
+def litellm_version_string() -> str | None:
+    try:
+        out = subprocess.check_output(
+            ["litellm", "--version"],
+            stderr=subprocess.STDOUT,
+            text=True,
+        )
+    except Exception:
+        return None
+    m = _LITELLM_VERSION_RE.search(out)
+    return m.group(1) if m else None

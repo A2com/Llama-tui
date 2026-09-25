@@ -6,7 +6,17 @@ from pathlib import Path
 
 from huggingface_hub import hf_hub_download
 
+from src.config import ConfigError
+
 _QUANT_RE = re.compile(r"(Q[0-9]_[A-Z0-9_]+|IQ[0-9]?_[A-Z0-9_]+|F[0-9]+|BF16|FP16|F16)")
+
+# Champs model-specific : reset à la baseline (défauts _ensure_config) ou purge
+# au switch de modèle — jamais de fusion sur la config du modèle précédent.
+_MODEL_SPECIFIC_RESET = {"ctx_size": 131072, "cache_type_k": "q4_0", "cache_type_v": "q4_0"}
+_MODEL_SPECIFIC_POP = ("spec_type", "spec_draft_n_max", "mmproj", "thinking")
+
+# Clés que le sidecar n'a pas le droit d'écraser (intégrité config serveur).
+_PROTECTED_KEYS = ("model", "host", "port", "n_gpu_layers", "proxy_backend", "threads")
 
 
 @dataclass
@@ -85,9 +95,21 @@ class ModelManager:
         sidecar = path.with_suffix(".json")
         sidecar_sets_spec = False
         if sidecar.exists():
-            sidecar_data = json.loads(sidecar.read_text())
-            cfg.update(sidecar_data)
+            try:
+                sidecar_data = json.loads(sidecar.read_text())
+            except json.JSONDecodeError as e:
+                raise ConfigError(f"Sidecar illisible pour {path.name}: {e}") from e
+            if not isinstance(sidecar_data, dict):
+                raise ConfigError(f"Sidecar invalide pour {path.name}: JSON non-object")
             sidecar_sets_spec = "spec_type" in sidecar_data
+
+        for key in _MODEL_SPECIFIC_POP:
+            cfg.pop(key, None)
+        cfg.update(_MODEL_SPECIFIC_RESET)
+        if sidecar.exists():
+            for key in _PROTECTED_KEYS:
+                sidecar_data.pop(key, None)
+            cfg.update(sidecar_data)
 
         if not sidecar_sets_spec:
             if "MTP" in path.name.upper():

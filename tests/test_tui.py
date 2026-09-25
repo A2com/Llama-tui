@@ -194,6 +194,89 @@ def test_tui_has_switch_proxy_backend_action():
     assert hasattr(LlamaTUI, "action_switch_proxy_backend")
 
 
+def test_switch_proxy_backend_preserves_thinking(monkeypatch, tmp_path):
+    """Le switch de backend doit reconstruire ProxyManager avec le flag thinking courant."""
+    from types import SimpleNamespace
+    import json
+    import src.tui as tui
+
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps({"proxy_backend": "bun", "thinking": True, "port": 8082}))
+    monkeypatch.setattr(tui, "CONFIG_FILE", cfg_file)
+
+    created = []
+
+    def fake_proxy_manager(*args, **kwargs):
+        created.append(kwargs)
+        return SimpleNamespace(status=lambda: tui.ProxyStatus.STOPPED, stop=lambda: None)
+
+    monkeypatch.setattr(tui, "ProxyManager", fake_proxy_manager)
+    fake = SimpleNamespace(
+        _proxy=SimpleNamespace(status=lambda: tui.ProxyStatus.STOPPED, stop=lambda: None),
+        _proxy_backend="bun",
+        _thinking=True,
+        _manager=SimpleNamespace(_config=SimpleNamespace(port=8082)),
+        _log=lambda m: None,
+        _ts=lambda: "00:00:00",
+        _refresh_ui=lambda: None,
+    )
+    tui.LlamaTUI.action_switch_proxy_backend(fake)
+    assert created, "ProxyManager non reconstruit"
+    assert created[-1].get("backend") == "litellm"
+    assert created[-1].get("thinking") is True, "flag thinking perdu au switch de backend"
+
+
+def test_load_and_restart_no_mutation_on_corrupt_sidecar(monkeypatch, tmp_path):
+    """Un sidecar JSON corrompu doit lever sans muter _manager/_proxy/_stats ni écrire la config."""
+    import json
+    from types import SimpleNamespace
+    from src.stats_collector import StatsCollector
+    import src.tui as tui
+
+    model = tmp_path / "m.gguf"
+    model.write_bytes(b"x")
+    sidecar = tmp_path / "m.json"
+    sidecar.write_text("{corrompu")
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps({"model": "old.gguf", "port": 8082}))
+
+    class FakeModelManager:
+        def __init__(self):
+            self.loaded = False
+
+        def load(self, path):
+            self.loaded = True
+            tui.ModelManager.load(self, path)
+
+    mgr = FakeModelManager()
+    mgr._models_dir = tmp_path
+    mgr._config_file = cfg_file
+    mgr._project_root = tmp_path
+
+    old_proxy = SimpleNamespace(status=lambda: tui.ProxyStatus.STOPPED, stop=lambda: None)
+    fake = SimpleNamespace(
+        _manager=SimpleNamespace(status=lambda: tui.ServerStatus.STOPPED, stop=lambda: None),
+        _proxy=old_proxy,
+        _stats=StatsCollector(port=8082),
+        _model_mgr=mgr,
+        _proxy_backend="bun",
+        _thinking=False,
+        _log=lambda m: None,
+        _ts=lambda: "00:00:00",
+        _populate_model_list=lambda: None,
+        _sync_cline=lambda: None,
+    )
+    fake.action_start_server = lambda: (_ for _ in ()).throw(AssertionError("start ne doit pas être appelé"))
+    fake.action_start_proxy = lambda: (_ for _ in ()).throw(AssertionError("start proxy ne doit pas être appelé"))
+
+    with pytest.raises(Exception):
+        tui.LlamaTUI._load_and_restart(fake, model)
+
+    assert mgr.loaded is False or json.loads(cfg_file.read_text())["model"] == "old.gguf", \
+        "config/server.json réécrit malgré le sidecar corrompu"
+    assert fake._manager is not fake.__dict__.get("_old_marker")
+
+
 def test_tui_has_proxy_backend_label():
     """Sidebar doit afficher le backend proxy actif."""
     tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
@@ -245,3 +328,70 @@ def test_tui_has_task_profile_screen():
 def test_tui_task_profiles_file_constant():
     from src.tui import TASK_PROFILES_FILE, PROJECT_ROOT
     assert TASK_PROFILES_FILE == PROJECT_ROOT / "config" / "task-profiles.json"
+
+
+def test_tui_has_litellm_version_label():
+    """Sidebar doit afficher la version de litellm dans sa zone."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "lbl-litellm-version" in tui_src, "lbl-litellm-version manquant"
+
+
+def test_tui_exposes_litellm_version_attribute():
+    from src.tui import LlamaTUI
+    app = LlamaTUI()
+    assert hasattr(app, "_litellm_version")
+
+
+def test_tui_cline_dir_overridable_by_env(monkeypatch, tmp_path):
+    import importlib
+    import src.tui as tui
+    monkeypatch.setenv("LLAMA_TUI_CLINE_DIR", str(tmp_path))
+    try:
+        importlib.reload(tui)
+        assert tui.CLINE_SETTINGS_DIR == tmp_path
+    finally:
+        monkeypatch.delenv("LLAMA_TUI_CLINE_DIR")
+        importlib.reload(tui)
+
+
+def test_tui_syncs_cline_on_model_load_and_mount():
+    import inspect
+    from src.tui import LlamaTUI
+    assert "_sync_cline" in inspect.getsource(LlamaTUI._load_and_restart)
+    assert "_sync_cline" in inspect.getsource(LlamaTUI.on_mount)
+
+
+def test_tui_sync_cline_passes_active_model_and_port(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import src.tui as tui
+    calls = []
+    monkeypatch.setattr(tui, "sync_cline_models", lambda *a, **k: calls.append((a, k)))
+    fake = SimpleNamespace(
+        _model_mgr=SimpleNamespace(active_model=tmp_path / "m.gguf"),
+        _manager=SimpleNamespace(_config=SimpleNamespace(port=9999)),
+        _log=lambda m: None,
+        _ts=lambda: "00:00:00",
+    )
+    tui.LlamaTUI._sync_cline(fake)
+    (_, kwargs) = calls[0]
+    assert kwargs["active_model"] == tmp_path / "m.gguf"
+    assert kwargs["base_url"] == "http://localhost:9999/v1"
+
+
+def test_tui_sync_cline_never_raises(monkeypatch, tmp_path):
+    from types import SimpleNamespace
+    import src.tui as tui
+
+    def boom(*a, **k):
+        raise ValueError("json cassé")
+
+    logs = []
+    monkeypatch.setattr(tui, "sync_cline_models", boom)
+    fake = SimpleNamespace(
+        _model_mgr=SimpleNamespace(active_model=tmp_path / "m.gguf"),
+        _manager=SimpleNamespace(_config=SimpleNamespace(port=8082)),
+        _log=logs.append,
+        _ts=lambda: "00:00:00",
+    )
+    tui.LlamaTUI._sync_cline(fake)
+    assert any("Cline" in m for m in logs)
