@@ -29,9 +29,7 @@ python llama-tui
 | `LLAMA_TUI_CONFIG` | `PROJECT_ROOT/config/server.json` | llama-server config |
 | `LLAMA_TUI_SERVER_BIN` | `llama-server` | llama-server binary path (override for side-by-side testing) |
 | `LLAMA_TUI_LITELLM_CONFIG` | `PROJECT_ROOT/config/litellm.yaml` | litellm proxy config |
-| `LLAMA_TUI_MONITOR_BIN` | `~/llama-monitor/target/release/llama-monitor` | Optional monitor binary |
-| `LLAMA_TUI_MONITOR_PORT` | `7778` | Monitor web port |
-| `LLAMA_TUI_MONITOR_PRESETS` | `PROJECT_ROOT/config/llama-monitor-presets.json` | Monitor presets |
+| `LLAMA_TUI_TASK_PROFILES` | `PROJECT_ROOT/config/task-profiles.json` | named model-switch profiles |
 
 ## Tests
 

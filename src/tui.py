@@ -27,9 +27,6 @@ PROJECT_ROOT = Path(__file__).parent.parent
 CONFIG_FILE  = Path(os.environ.get("LLAMA_TUI_CONFIG", PROJECT_ROOT / "config" / "server.json"))
 PROXY_ROOT = Path(os.environ.get("LLAMA_TUI_LITELLM_CONFIG", PROJECT_ROOT / "config" / "litellm.yaml"))
 MODELS_DIR   = Path(os.environ.get("LLAMA_TUI_MODELS_DIR", PROJECT_ROOT / "models"))
-LLAMA_MONITOR_BIN = Path(os.environ.get("LLAMA_TUI_MONITOR_BIN", Path.home() / "llama-monitor" / "target" / "release" / "llama-monitor"))
-LLAMA_MONITOR_PORT = int(os.environ.get("LLAMA_TUI_MONITOR_PORT", 7778))
-LLAMA_MONITOR_PRESETS = Path(os.environ.get("LLAMA_TUI_MONITOR_PRESETS", PROJECT_ROOT / "config" / "llama-monitor-presets.json"))
 TASK_PROFILES_FILE = Path(os.environ.get("LLAMA_TUI_TASK_PROFILES", PROJECT_ROOT / "config" / "task-profiles.json"))
 CLINE_SETTINGS_DIR = Path(os.environ.get("LLAMA_TUI_CLINE_DIR", Path.home() / ".cline" / "data" / "settings"))
 
@@ -109,7 +106,6 @@ class HelpScreen(ModalScreen):
             ("z", "Tout arrêter"),
             ("c", "Vide les logs"),
             ("d", "Ouvre Llama WebUI"),
-            ("m", "Démarre llama-monitor"),
             ("n", "Télécharge un modèle (HF)"),
             ("b", "Bascule backend proxy (bun↔litellm)"),
             ("t", "Profil de tâche (vitesse/qualité/uncensored)"),
@@ -326,7 +322,6 @@ class LlamaTUI(App):
         Binding("z",      "stop_all",       "Tout arrêter"),
         Binding("c",      "clear_logs",     "Vider logs"),
         Binding("d",      "open_activity",  "Llama WebUI"),
-        Binding("m",      "start_llama_monitor", "Monitor"),
         Binding("n",      "download_model", "Télécharger"),
         Binding("b",      "switch_proxy_backend", "Proxy backend"),
         Binding("t",      "task_profile",   "Profil tâche"),
@@ -401,10 +396,6 @@ class LlamaTUI(App):
                 yield Label("", id="lbl-proxy-health")
                 yield Label("", id="lbl-proxy-backend")
                 yield Label("", id="lbl-litellm-version")
-                yield Static(" ", classes="divider")
-                yield Static("▪ llama-monitor", classes="section")
-                yield Static("─" * 26, classes="divider")
-                yield Label("", id="lbl-monitor-status")
             with TabbedContent(id="right-tabs"):
                 with TabPane("Stats", id="tab-stats"):
                     with Vertical(id="stats-panel"):
@@ -431,7 +422,6 @@ class LlamaTUI(App):
             yield Button("■ Proxy [o]",  id="btn-proxy-stop",  variant="error")
             yield Button("✕ Logs [c]",   id="btn-clear")
             yield Button("🌐 Llama WebUI [d]", id="btn-activity", variant="warning")
-            yield Button("📈 Monitor [m]", id="btn-monitor")
         yield Footer()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
@@ -498,7 +488,6 @@ class LlamaTUI(App):
         self._refresh_status_bar()
         self._refresh_server()
         self._refresh_proxy()
-        self._refresh_monitor()
         self._refresh_stats()
 
     def _refresh_status_bar(self) -> None:
@@ -570,13 +559,6 @@ class LlamaTUI(App):
 
         self.query_one("#btn-proxy-start", Button).disabled = is_running
         self.query_one("#btn-proxy-stop",  Button).disabled = not is_running
-
-    def _refresh_monitor(self) -> None:
-        up = _port_open(LLAMA_MONITOR_PORT)
-        sym = "●" if up else "○"
-        color = _CLR_OK if up else _CLR_KO
-        self.query_one("#lbl-monitor-status", Label).update(
-            f"[bold]Monitor:[/bold] [bold {color}]{sym} :{LLAMA_MONITOR_PORT}[/]")
 
     def _refresh_stats(self) -> None:
         s = self._stats.last_stats
@@ -787,38 +769,6 @@ class LlamaTUI(App):
         subprocess.Popen(["open", f"http://localhost:{self._manager._config.port}"])
         self._log(f"[{self._ts()}] 📊 Llama WebUI → http://localhost:{self._manager._config.port}")
 
-    def _build_llama_monitor_cmd(self, llama_server_bin: str) -> list[str]:
-        from src.config import ServerConfig
-        server_port = ServerConfig.from_file(CONFIG_FILE).port
-        return [
-            str(LLAMA_MONITOR_BIN),
-            "--llama-server-path", llama_server_bin,
-            "--llama-server-cwd", str(PROJECT_ROOT),
-            "--port", str(LLAMA_MONITOR_PORT),
-            "--models-dir", str(MODELS_DIR),
-            "--presets-file", str(LLAMA_MONITOR_PRESETS),
-            "--monitor-port", str(server_port),
-        ]
-
-    def action_start_llama_monitor(self) -> None:
-        if not LLAMA_MONITOR_BIN.exists():
-            self._log(f"[{self._ts()}] ⚠ llama-monitor non trouvé : {LLAMA_MONITOR_BIN}")
-            self._log(f"[{self._ts()}]   → cd ~/llama-monitor && cargo build --release")
-            return
-        import shutil
-        llama_server_bin = shutil.which("llama-server") or "llama-server"
-        try:
-            subprocess.Popen(
-                self._build_llama_monitor_cmd(llama_server_bin),
-                stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
-                cwd=str(PROJECT_ROOT),
-            )
-            time.sleep(0.8)
-            subprocess.Popen(["open", f"http://localhost:{LLAMA_MONITOR_PORT}"])
-            self._log(f"[{self._ts()}] ▶ llama-monitor lancé → http://localhost:{LLAMA_MONITOR_PORT}")
-        except Exception as e:
-            self._log(f"[{self._ts()}] ✗ Erreur llama-monitor: {e}")
-
     def action_download_model(self) -> None:
         self.push_screen(DownloadScreen(), self._on_download_result)
 
@@ -852,7 +802,6 @@ class LlamaTUI(App):
             "btn-proxy-stop":  self.action_stop_proxy,
             "btn-clear":       self.action_clear_logs,
             "btn-activity":    self.action_open_activity,
-            "btn-monitor":     self.action_start_llama_monitor,
         }
         if event.button.id in actions:
             actions[event.button.id]()

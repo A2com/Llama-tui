@@ -35,9 +35,6 @@ pytest tests/test_server_manager.py::test_start_returns_pid
 | `LLAMA_TUI_CONFIG` | `PROJECT_ROOT/config/server.json` | llama-server config file |
 | `LLAMA_TUI_SERVER_BIN` | `llama-server` | llama-server binary path (override for side-by-side version testing) |
 | `LLAMA_TUI_LITELLM_CONFIG` | `PROJECT_ROOT/config/litellm.yaml` | litellm proxy config |
-| `LLAMA_TUI_MONITOR_BIN` | `~/llama-monitor/target/release/llama-monitor` | llama-monitor binary path |
-| `LLAMA_TUI_MONITOR_PORT` | `7778` | llama-monitor web port |
-| `LLAMA_TUI_MONITOR_PRESETS` | `PROJECT_ROOT/config/llama-monitor-presets.json` | monitor presets file |
 | `LLAMA_TUI_TASK_PROFILES` | `PROJECT_ROOT/config/task-profiles.json` | named model-switch profiles (e.g. vitesse/qualite) |
 | `LLAMA_TUI_CLINE_DIR` | `~/.cline/data/settings` | Cline settings dir synced by the TUI (`models.json`, `providers.json`) |
 
@@ -85,7 +82,6 @@ src/
 | `a` | Start all |
 | `z` | Stop all |
 | `n` | Download model from HuggingFace |
-| `m` | Start llama-monitor |
 | `d` | Open Llama WebUI |
 | `c` | Clear logs |
 | `/` | Filter models |

@@ -106,33 +106,19 @@ def test_tui_theme_is_dark():
     assert app.theme in ("textual-dark", "css"), f"theme actuel : {app.theme}"
 
 
-def test_tui_has_llama_monitor_action():
-    """Le TUI doit exposer une action pour lancer llama-monitor."""
-    from src.tui import LlamaTUI
-    assert hasattr(LlamaTUI, "action_start_llama_monitor")
-
-
-def test_tui_has_llama_monitor_binding():
-    """Le TUI doit avoir un binding clavier pour llama-monitor."""
+def test_tui_monitor_fully_removed():
+    """llama-monitor est retiré du TUI : plus de binding, bouton, label ni action."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "llama-monitor" not in tui_src.lower()
+    assert "LLAMA_MONITOR" not in tui_src
+    assert "btn-monitor" not in tui_src
+    assert "lbl-monitor-status" not in tui_src
+    assert "_refresh_monitor" not in tui_src
     from src.tui import LlamaTUI
     bindings = {b.key: b.action for b in LlamaTUI.BINDINGS}
-    assert "m" in bindings
-    assert bindings["m"] == "start_llama_monitor"
-
-
-def test_llama_monitor_cmd_includes_models_dir():
-    """La commande llama-monitor doit passer --models-dir pour la découverte des modèles."""
-    from src.tui import LlamaTUI, MODELS_DIR
-    app = LlamaTUI()
-    cmd = app._build_llama_monitor_cmd("llama-server")
-    assert "--models-dir" in cmd
-    assert str(MODELS_DIR) in cmd
-
-
-def test_tui_has_monitor_status_label():
-    """Sidebar doit afficher un label de statut llama-monitor (port 7778)."""
-    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
-    assert "lbl-monitor-status" in tui_src, "lbl-monitor-status manquant"
+    assert "m" not in bindings, "touche m doit être libérée"
+    assert not hasattr(LlamaTUI, "action_start_llama_monitor")
+    assert not hasattr(LlamaTUI, "_build_llama_monitor_cmd")
 
 
 def test_tui_has_llama_version_label():
