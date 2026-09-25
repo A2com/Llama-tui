@@ -27,6 +27,7 @@ class ServerConfig:
     spec_type: Optional[str] = None
     spec_draft_n_max: Optional[int] = None
     mmproj: Optional[str] = None
+    server_bin: Optional[str] = None  # binaire llama-server (persisté, indépendant de l'env)
     _project_root: Path = field(default=Path("."), repr=False)
 
     @classmethod
@@ -69,6 +70,7 @@ class ServerConfig:
             spec_type=spec_type,
             spec_draft_n_max=spec_draft_n_max,
             mmproj=data.get("mmproj"),
+            server_bin=data.get("server_bin"),
             _project_root=project_root,
         )
 

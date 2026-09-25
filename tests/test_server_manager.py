@@ -188,3 +188,46 @@ def test_health_check_false_on_500(manager):
     with patch("httpx.get") as mock_get:
         mock_get.return_value.status_code = 500
         assert manager.health_check() is False
+
+
+def test_server_bin_from_config_file(tmp_path, monkeypatch):
+    """server_bin persisté dans server.json doit primer sur le binaire par défaut,
+    indépendamment de l'environnement du process qui lance le TUI."""
+    import json
+    import src.server_manager as sm_mod
+
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps({
+        "model": "models/m.gguf", "host": "0.0.0.0", "port": 8082,
+        "n_gpu_layers": 99, "ctx_size": 4096, "batch_size": 512, "ubatch_size": 512,
+        "threads": 4, "flash_attn": True, "parallel": 1, "cont_batching": True,
+        "cache_type_k": "f16", "cache_type_v": "f16",
+        "server_bin": "/custom/path/llama-server",
+    }))
+    monkeypatch.delenv("LLAMA_TUI_SERVER_BIN", raising=False)
+    mgr = sm_mod.ServerManager(cfg_file)
+    monkeypatch.setattr(sm_mod.subprocess, "Popen", lambda cmd, **k: (_ for _ in ()).throw(
+        RuntimeError(f"CMD:{cmd[0]}")))
+    with pytest.raises(RuntimeError, match=r"CMD:/custom/path/llama-server"):
+        mgr.start()
+
+
+def test_server_bin_env_overrides_config(tmp_path, monkeypatch):
+    """L'env var LLAMA_TUI_SERVER_BIN reste prioritaire (tests side-by-side)."""
+    import json
+    import src.server_manager as sm_mod
+
+    cfg_file = tmp_path / "server.json"
+    cfg_file.write_text(json.dumps({
+        "model": "models/m.gguf", "host": "0.0.0.0", "port": 8082,
+        "n_gpu_layers": 99, "ctx_size": 4096, "batch_size": 512, "ubatch_size": 512,
+        "threads": 4, "flash_attn": True, "parallel": 1, "cont_batching": True,
+        "cache_type_k": "f16", "cache_type_v": "f16",
+        "server_bin": "/custom/path/llama-server",
+    }))
+    monkeypatch.setenv("LLAMA_TUI_SERVER_BIN", "/env/path/llama-server")
+    mgr = sm_mod.ServerManager(cfg_file)
+    monkeypatch.setattr(sm_mod.subprocess, "Popen", lambda cmd, **k: (_ for _ in ()).throw(
+        RuntimeError(f"CMD:{cmd[0]}")))
+    with pytest.raises(RuntimeError, match=r"CMD:/env/path/llama-server"):
+        mgr.start()
