@@ -18,11 +18,35 @@ LLM locale avec TUI (Python ~1 770 lignes + TypeScript 218 lignes) qui orchestre
 
 | Composant | Version | Note |
 |---|---|---|
-| llama.cpp | **0.5.0 (build 11146)** via Homebrew | installé et à jour ; `draft-mtp` supporté |
+| llama.cpp (brew) | **0.5.0 (build 11146)** via Homebrew | installé ; **bottle SANS WebUI** (voir ci-dessous) |
+| llama.cpp (custom) | **0.5.0 (b11146, WebUI embarquée)** | `~/builds/llama.cpp/build/bin/llama-server` — binaire actif du TUI |
 | Python | 3.11.16 (Homebrew) | `.venv` recréée (l'ancienne pointait vers `~/llama.ccp` + un Python supprimé) |
-| bun | 1.4.2 | backend proxy par défaut |
+| bun | 1.4.2 | backend proxy par défaut ; sert aussi de runtime node pour le build UI |
 | litellm | non installé | décision : backend bun uniquement |
 | alias | `llama-tui` dans `~/.zshrc` | lance la venv directement (contourne le python3 système 3.9) |
+| `LLAMA_TUI_SERVER_BIN` | `~/builds/llama.cpp/build/bin/llama-server` | dans `~/.zshrc` — pointe sur le build custom |
+
+### Binaire llama-server custom (WebUI)
+
+Le bottle Homebrew est compilé sans `LLAMA_BUILD_UI` → `GET /` = 404 (diagnostic 2026-09-25).
+Solution en place : build source v0.5.0 avec WebUI embarquée (test garde-fou
+`tests/test_webui_assets.py`) :
+
+```bash
+# Rebuild si besoin (assets UI = app Svelte dans tools/ui/, construite via bun)
+cd ~/builds/llama.cpp
+cmake -S . -B build -DLLAMA_BUILD_UI=ON -DLLAMA_USE_PREBUILT_UI=ON \
+      -DBUILD_SHARED_LIBS=ON -DLLAMA_BUILD_TESTS=OFF
+cd tools/ui && bun install && PATH="$HOME/.local/bin:$PATH" bun run build  # génère dist/
+cmake --build ../build --target llama-server -j8
+
+# ⚠ MAINTENANCE : ne jamais remplacer LLAMA_TUI_SERVER_BIN par le binaire brew
+# (bottle sans WebUI). `brew upgrade llama.cpp` est sans effet sur le binaire du TUI.
+```
+
+Note : le bucket HF `ggml-org/llama-ui` (prébuilt) est privé (401) — l'UI se construit
+localement via bun (shim `~/.local/bin/node` → bun). `GET /` requiert `--compressed` côté
+curl (gzip) ; les navigateurs gèrent nativement.
 
 ## Ce qui a été fait (chronologie)
 
@@ -74,10 +98,13 @@ pas de rollback sidecar, dead code, logs non purgés (840 Mo), sécurité proxy 
 | `d3caed1` | feat(tui): dashboard redesign (catppuccin-mocha, single action bar) |
 | `68c90c6` | feat(tui): stats visuals (digits, labeled sparklines, ctx bar) |
 | `1ae536b` | docs: plan UI redesign exécuté (résultats + hashes) |
+| `e479959` | docs: status du projet |
+| (webui) | fix: binaire llama-server custom avec WebUI embarquée + test garde-fou (voir « Environnement ») |
 
 ## État des tests
 
-**203 pytest + 15 bun tests, 100 % verts** (dernier run 0.57 s).
+**204 pytest + 15 bun tests, 100 % verts**. Nouveauté : `test_webui_assets.py` — garde-fou
+qui échoue si le binaire llama-server actif ne sert pas la WebUI (404).
 Nouveaux tests TDD créés cette session : test d'absence monitor, action-bar unique,
 palette catppuccin, cache_history idle, cache fin de génération, structure graphiques
 (labels/Digits/ProgressBar/style), thinking au switch, rollback sidecar.
