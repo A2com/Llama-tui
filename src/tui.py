@@ -33,9 +33,9 @@ CLINE_SETTINGS_DIR = Path(os.environ.get("LLAMA_TUI_CLINE_DIR", Path.home() / ".
 
 DEFAULT_MODEL = "Qwen3.6-35B-A3B-MTP-UD-Q6_K_XL.gguf"
 
-# Monokai — styles Rich inline (les tags [running]/[badge-ok] n'existent pas côté Rich)
-_CLR_OK = "#a6e22e"
-_CLR_KO = "#f92672"
+# Catppuccin Mocha — styles Rich inline (tags [running]/[badge-ok] inexistants côté Rich)
+_CLR_OK = "#a6e3a1"
+_CLR_KO = "#f38ba8"
 
 
 def _port_open(port: int, host: str = "127.0.0.1") -> bool:
@@ -208,107 +208,112 @@ class TaskProfileScreen(ModalScreen):
 
 class LlamaTUI(App):
     CSS = """
-    Screen { layout: vertical; }
+    Screen { layout: vertical; background: #1e1e2e; }
+
+    /* ── Catppuccin Mocha ── */
+    /* fond #1e1e2e · surface #313244 · vert #a6e3a1 · rouge #f38ba8
+       orange #fab387 · bleu #89b4fa · texte #cdd6f4 · muted #9399b2 */
 
     /* ── Barre de statut globale ── */
     #status-bar {
         height: 1;
-        background: #1e1f1c;
-        color: #f8f8f2;
+        background: #181825;
+        color: #cdd6f4;
         padding: 0 1;
         text-style: bold;
     }
-    #status-bar .sep         { color: $surface-lighten-1; }
+    #status-bar .sep         { color: #45475a; }
 
     #main  { height: 1fr; layout: horizontal; }
 
     /* ── Panneau modèles ── */
     #model-panel {
         width: 38;
-        border: solid $surface-lighten-1;
+        background: #181825;
+        border: round #45475a;
         padding: 1 1;
     }
-    #model-panel .section  { color: $text; text-style: bold; }
-    #model-panel .divider  { color: $surface-lighten-1; }
+    #model-panel .section  { color: #89b4fa; text-style: bold; }
+    #model-panel .divider  { color: #45475a; }
     #model-list { height: 1fr; }
-    ListView { background: $surface; border: none; }
+    ListView { background: #181825; border: none; }
     ListItem { padding: 0 1; }
-    ListItem.active-model { color: $success; text-style: bold; }
-    ListItem:focus { background: $surface-lighten-2 30%; }
-    ListView:focus > ListItem.--highlight { background: $surface-lighten-2 40%; }
-    .model-quant { color: $warning; }
-    .model-meta  { color: $text-muted; }
+    ListItem.active-model { color: #a6e3a1; text-style: bold; }
+    ListItem:focus { background: #313244; }
+    ListView:focus > ListItem.--highlight { background: #45475a; }
+    .model-quant { color: #fab387; }
+    .model-meta  { color: #9399b2; }
 
     /* ── Sidebar statut ── */
     #sidebar {
         width: 34;
-        border: solid $surface-lighten-1;
+        background: #181825;
+        border: round #45475a;
         padding: 1 2;
     }
     #sidebar Label { margin-bottom: 1; }
 
     /* ── Log ── */
     #log-panel {
-        border: solid $surface-lighten-1;
+        border: round #45475a;
         height: 1fr;
         padding: 0 1;
     }
 
-    /* ── Barres de boutons ── */
-    #controls, #proxy-controls {
+    /* ── Action bar unique ── */
+    #action-bar {
         height: auto;
         layout: horizontal;
         padding: 0 1;
+        background: #181825;
     }
-    #controls { background: $surface; }
-    #proxy-controls { background: $surface-darken-1; }
     Button {
         margin: 0 1;
         width: 18;
         height: 3;
-        background: #272822;
-        color: #f8f8f2;
+        background: #313244;
+        color: #cdd6f4;
     }
-    Button:hover { background: #3e3d32; color: #ffffff; }
-    Button:disabled { background: #1e1f1c; color: #75715a; }
-    .Button--success   { color: #a6e22e; }
-    .Button--success:hover   { color: #c8f54a; }
-    .Button--success:disabled { color: #4a5a1e; }
-    .Button--error     { color: #f92672; }
-    .Button--error:hover     { color: #ff5c8f; }
-    .Button--error:disabled  { color: #5a1e3a; }
-    .Button--warning   { color: #fd971f; }
-    .Button--warning:hover   { color: #ffb84d; }
-    .Button--warning:disabled { color: #5a3e1e; }
-    .Button--primary   { color: #66d9ef; }
-    .Button--primary:hover   { color: #8ce8f5; }
-    .Button--primary:disabled { color: #2e5a6a; }
+    Button:hover { background: #45475a; color: #ffffff; }
+    Button:disabled { background: #181825; color: #585b70; }
+    .Button--success   { color: #a6e3a1; }
+    .Button--success:hover   { color: #c9f7bc; }
+    .Button--success:disabled { color: #3e4a3a; }
+    .Button--error     { color: #f38ba8; }
+    .Button--error:hover   { color: #ff9dbb; }
+    .Button--error:disabled  { color: #5a3a4a; }
+    .Button--warning   { color: #fab387; }
+    .Button--warning:hover   { color: #ffd0b3; }
+    .Button--warning:disabled { color: #5a463a; }
+    .Button--primary   { color: #89b4fa; }
+    .Button--primary:hover   { color: #b3ccff; }
+    .Button--primary:disabled { color: #3a446a; }
 
-    .section  { color: $text; text-style: bold; }
-    .divider  { color: $surface-lighten-1; }
-    .hint     { color: $text-muted; text-style: italic; }
+    .section  { color: #89b4fa; text-style: bold; }
+    .divider  { color: #45475a; }
+    .hint     { color: #9399b2; text-style: italic; }
 
     /* ── Panneau droit (onglets Stats/Slots/Logs) ── */
     #right-tabs { height: 1fr; }
 
     /* ── Stats enrichies ── */
     #stats-panel {
-        border: solid $surface-lighten-1;
+        border: round #45475a;
         height: auto;
         padding: 0 1;
     }
     #stats-grid { height: auto; }
     #stats-grid Label { margin-bottom: 0; }
-    #lbl-tps { color: #fd971f; text-style: bold; }
-    #lbl-tps-secondary { color: #75715a; }
+    #lbl-tps { color: #fab387; text-style: bold; }
+    #lbl-tps-secondary { color: #9399b2; }
     #sparkline-tps { height: 2; }
-    #sparkline-tps > .sparkline--max-color { color: #fd971f; }
-    #sparkline-tps > .sparkline--min-color { color: #75715a; }
+    #sparkline-tps > .sparkline--max-color { color: #fab387; }
+    #sparkline-tps > .sparkline--min-color { color: #6c7086; }
     #sparkline-cache { height: 2; }
-    #sparkline-cache > .sparkline--max-color { color: #a6e22e; }
-    #sparkline-cache > .sparkline--min-color { color: #75715a; }
+    #sparkline-cache > .sparkline--max-color { color: #a6e3a1; }
+    #sparkline-cache > .sparkline--min-color { color: #6c7086; }
     #tab-slots { padding: 0 1; }
-    #lbl-slots { color: #f8f8f2; }
+    #lbl-slots { color: #cdd6f4; }
     """
 
     BINDINGS = [
@@ -410,18 +415,17 @@ class LlamaTUI(App):
                     yield Label("", id="lbl-slots")
                 with TabPane("Logs", id="tab-logs"):
                     yield Log(id="log-panel", highlight=True)
-        with Horizontal(id="controls"):
+        with Horizontal(id="action-bar"):
             yield Button("▶ LLM [s]",    id="btn-start",     variant="success")
             yield Button("■ LLM [q]",    id="btn-stop",      variant="error")
             yield Button("↺ LLM [r]",    id="btn-restart",   variant="warning")
             yield Button("⏏ Load [l]",   id="btn-load",      variant="primary")
             yield Button("▶▶ Tout [a]",  id="btn-all-start", variant="success")
             yield Button("■■ Tout [z]",  id="btn-all-stop",  variant="error")
-        with Horizontal(id="proxy-controls"):
             yield Button("▶ Proxy [p]",  id="btn-proxy-start", variant="success")
             yield Button("■ Proxy [o]",  id="btn-proxy-stop",  variant="error")
             yield Button("✕ Logs [c]",   id="btn-clear")
-            yield Button("🌐 Llama WebUI [d]", id="btn-activity", variant="warning")
+            yield Button("🌐 WebUI [d]", id="btn-activity", variant="warning")
         yield Footer()
 
     # ── Lifecycle ─────────────────────────────────────────────────────────

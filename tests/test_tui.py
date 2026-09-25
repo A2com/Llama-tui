@@ -121,6 +121,35 @@ def test_tui_monitor_fully_removed():
     assert not hasattr(LlamaTUI, "_build_llama_monitor_cmd")
 
 
+def test_tui_single_action_bar():
+    """Les 2 barres de boutons sont fusionnées en une action-bar unique."""
+    tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "#action-bar" in tui_src, "action-bar unique manquante"
+    assert "#controls {" not in tui_src, "ancienne barre #controls encore présente"
+    assert "#proxy-controls {" not in tui_src, "ancienne barre #proxy-controls encore présente"
+    from src.tui import LlamaTUI
+    app = LlamaTUI()
+    # ids de boutons déclarés dans compose (source), sans monter l'app (pas d'écran actif hors run)
+    import inspect
+    compose_src = inspect.getsource(LlamaTUI.compose)
+    for btn_id in ("btn-start", "btn-stop", "btn-restart", "btn-load",
+                   "btn-all-start", "btn-all-stop",
+                   "btn-proxy-start", "btn-proxy-stop", "btn-clear", "btn-activity"):
+        assert btn_id in compose_src, f"{btn_id} absent de compose()"
+    assert 'id="action-bar"' in compose_src
+    assert 'id="controls"' not in compose_src and 'id="proxy-controls"' not in compose_src
+
+
+def test_tui_palette_is_catppuccin():
+    """Palette catppuccin-mocha : plus de Monokai."""
+    css = (PROJECT_ROOT / "src" / "tui.py").read_text()
+    assert "#1e1e2e" in css, "fond catppuccin absent"
+    assert "#a6e3a1" in css, "vert catppuccin absent"
+    assert "#272822" not in css, "fond Monokai encore présent"
+    assert "#a6e22e" not in css, "vert Monokai encore présent"
+    assert "#f92672" not in css, "rouge Monokai encore présent"
+
+
 def test_tui_has_llama_version_label():
     """Sidebar doit afficher la version de llama.cpp active."""
     tui_src = (PROJECT_ROOT / "src" / "tui.py").read_text()
