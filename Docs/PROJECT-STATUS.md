@@ -1,7 +1,7 @@
 # Status projet — llama-tui
 
-**Date** : 2026-09-25 · **Repo** : `/Volumes/Twoa Files/Git/llama.cpp` · **Branche** : `main`
-**Head** : `1ae536b` · **Working tree** : propre (untracked : `.DS_Store` uniquement)
+**Date** : 2026-09-26 · **Repo** : `~/Llamacpp-server` · **Branche** : `main`
+**Head** : `7ce6e4b` · **Working tree** : propre (untracked : `.DS_Store` uniquement)
 
 ## Qu'est-ce que ce projet
 
@@ -14,17 +14,18 @@ LLM locale avec TUI (Python ~1 770 lignes + TypeScript 218 lignes) qui orchestre
 3. **TUI** (`llama-tui`) — gestion des deux processus : start/stop/restart, changement de
    modèle à chaud, stats temps réel (t/s, cache, ctx), profils de tâche, téléchargement HF
 
-## Environnement (réparé le 2026-09-25)
+## Environnement (réparé le 2026-09-26, migration machine a2com → andyaugustine)
 
 | Composant | Version | Note |
 |---|---|---|
 | llama.cpp (brew) | **0.5.0 (build 11146)** via Homebrew | installé ; **bottle SANS WebUI** (voir ci-dessous) |
-| llama.cpp (custom) | **0.5.0 (b11146, WebUI embarquée)** | `~/builds/llama.cpp/build/bin/llama-server` — binaire actif du TUI |
-| Python | 3.11.16 (Homebrew) | `.venv` recréée (l'ancienne pointait vers `~/llama.ccp` + un Python supprimé) |
-| bun | 1.4.2 | backend proxy par défaut ; sert aussi de runtime node pour le build UI |
+| llama.cpp (custom) | **0.5.0 (b11146, WebUI embarquée)** | `~/builds/llama.cpp/build/bin/llama-server` — binaire actif du TUI (via `server_bin`) |
+| Python | 3.11.16 (Homebrew) | `.venv` recréée (l'ancienne pointait vers un Python supprimé) |
+| bun | 1.4.2 | backend proxy par défaut |
+| cmake / node | 4.4.3 / 26.10 | requis pour le rebuild custom (build npm UI natif, plus de shim node→bun) |
 | litellm | non installé | décision : backend bun uniquement |
-| alias | `llama-tui` dans `~/.zshrc` | lance la venv directement (contourne le python3 système 3.9) |
-| `LLAMA_TUI_SERVER_BIN` | `~/builds/llama.cpp/build/bin/llama-server` | dans `~/.zshrc` — pointe sur le build custom |
+| alias | `llama-tui` dans `~/.zshrc` (créé) | lance la venv directement (contourne le python3 système 3.9) |
+| `config/server.json` → `server_bin` | `~/builds/llama.cpp/build/bin/llama-server` | persisté dans server.json (gitignore, machine-spécifique) |
 
 ### Binaire llama-server custom (WebUI)
 
@@ -33,20 +34,30 @@ Solution en place : build source v0.5.0 avec WebUI embarquée (test garde-fou
 `tests/test_webui_assets.py`) :
 
 ```bash
-# Rebuild si besoin (assets UI = app Svelte dans tools/ui/, construite via bun)
+# Rebuild si besoin (l'UI est construite via npm automatiquement par scripts/ui-assets.cmake)
 cd ~/builds/llama.cpp
-cmake -S . -B build -DLLAMA_BUILD_UI=ON -DLLAMA_USE_PREBUILT_UI=ON \
+git pull && cmake -S . -B build -DLLAMA_BUILD_UI=ON -DLLAMA_USE_PREBUILT_UI=ON \
       -DBUILD_SHARED_LIBS=ON -DLLAMA_BUILD_TESTS=OFF
-cd tools/ui && bun install && PATH="$HOME/.local/bin:$PATH" bun run build  # génère dist/
-cmake --build ../build --target llama-server -j8
+cmake --build build --target llama-server -j8
+# Prérequis : brew install cmake node
 
-# ⚠ MAINTENANCE : ne jamais remplacer LLAMA_TUI_SERVER_BIN par le binaire brew
+# ⚠ MAINTENANCE : ne jamais remplacer server_bin par le binaire brew
 # (bottle sans WebUI). `brew upgrade llama.cpp` est sans effet sur le binaire du TUI.
 ```
 
 Note : le bucket HF `ggml-org/llama-ui` (prébuilt) est privé (401) — l'UI se construit
-localement via bun (shim `~/.local/bin/node` → bun). `GET /` requiert `--compressed` côté
-curl (gzip) ; les navigateurs gèrent nativement.
+localement via npm (`scripts/ui-assets.cmake` la gère nativement : build + gzip + embed,
+70 assets). `GET /` requiert `--compressed` côté curl (gzip) ; les navigateurs gèrent
+nativement. Version affichée : `0.5.0-dev (build 1)` (shallow clone sans build-info, même
+commit `7fe450e19` que le bottle — cosmétique).
+
+## Réparation 2026-09-26 (migration machine)
+
+Session de remise en service après migration (`/Users/a2com/...` → `/Users/andyaugustine/...`) :
+venv recréée, `brew install python@3.11 llama.cpp cmake node`, alias `~/.zshrc` créé,
+`server_bin` corrigé, build custom WebUI refait (`GET /` → 200). **206 pytest + 15 bun
+tests, 100 % verts** (garde-fou WebUI inclus). Chaîne complète validée : llama-server
+(health 12-16 s) + proxy bun (`/v1/messages` Anthropic → « OK ») + widgets TUI.
 
 ## Ce qui a été fait (chronologie)
 
@@ -99,12 +110,13 @@ pas de rollback sidecar, dead code, logs non purgés (840 Mo), sécurité proxy 
 | `68c90c6` | feat(tui): stats visuals (digits, labeled sparklines, ctx bar) |
 | `1ae536b` | docs: plan UI redesign exécuté (résultats + hashes) |
 | `e479959` | docs: status du projet |
-| (webui) | fix: binaire llama-server custom avec WebUI embarquée + test garde-fou (voir « Environnement ») |
+| `7ce6e4b` | fix(config): server_bin persiste dans server.json (indépendant de l'env TUI) |
+| (2026-09-26) | docs: migration machine + rebuild WebUI (build npm natif, plus de shim bun) |
 
 ## État des tests
 
-**204 pytest + 15 bun tests, 100 % verts**. Nouveauté : `test_webui_assets.py` — garde-fou
-qui échoue si le binaire llama-server actif ne sert pas la WebUI (404).
+**206 pytest + 15 bun tests, 100 % verts**. Garde-fou `test_webui_assets.py` : échoue
+si le binaire llama-server actif ne sert pas la WebUI (404).
 Nouveaux tests TDD créés cette session : test d'absence monitor, action-bar unique,
 palette catppuccin, cache_history idle, cache fin de génération, structure graphiques
 (labels/Digits/ProgressBar/style), thinking au switch, rollback sidecar.
