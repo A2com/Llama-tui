@@ -1,6 +1,6 @@
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime
 from pathlib import Path
 
@@ -27,12 +27,24 @@ class ModelInfo:
     mtime: float = 0.0
     quant: str = ""
     ctx_train: str = ""
+    sidecar: dict = field(default_factory=dict)
 
     @property
     def mtime_date(self) -> str:
         if not self.mtime:
             return "—"
         return datetime.fromtimestamp(self.mtime).strftime("%Y-%m-%d")
+
+
+def _read_sidecar(path: Path) -> dict:
+    sidecar = path.with_suffix(".json")
+    if not sidecar.exists():
+        return {}
+    try:
+        data = json.loads(sidecar.read_text())
+    except json.JSONDecodeError:
+        return {}
+    return data if isinstance(data, dict) else {}
 
 
 def _read_sidecar_ctx(path: Path) -> str:
@@ -60,7 +72,7 @@ class ModelManager:
         return self._project_root / p
 
     def scan(self) -> list[ModelInfo]:
-        files = sorted(self._models_dir.glob("*.gguf"))
+        files = sorted(f for f in self._models_dir.glob("*.gguf") if not f.name.startswith("mmproj"))
         infos = [
             ModelInfo(
                 name=f.stem,
@@ -69,6 +81,7 @@ class ModelManager:
                 mtime=f.stat().st_mtime,
                 quant=_extract_quant(f.stem),
                 ctx_train=_read_sidecar_ctx(f),
+                sidecar=_read_sidecar(f),
             )
             for f in files
         ]

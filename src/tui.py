@@ -12,7 +12,8 @@ from textual.app import App, ComposeResult
 from textual.binding import Binding
 from textual.containers import Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
-from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input, TabbedContent, TabPane, Digits, ProgressBar
+from rich.text import Text
+from textual.widgets import Button, Footer, Label, ListItem, ListView, Log, Sparkline, Static, Input, TabbedContent, TabPane, ProgressBar
 
 from src.model_manager import ModelManager
 from src.proxy_manager import ProxyManager, ProxyStatus
@@ -206,6 +207,220 @@ class TaskProfileScreen(ModalScreen):
         self.dismiss(event.item.profile_name)
 
 
+# ── Gros compteur t/s : glyphes 3×3 de Textual étirés en 6×6 (mêmes traits fins box-drawing)
+_V = "┃    ┃"
+_BIG_FONT = {
+    "0": ("┏━━━━┓", _V, _V, _V, _V, "┗━━━━┛"),
+    "1": (" ╺━━┓ ", "    ┃ ", "    ┃ ", "    ┃ ", "    ┃ ", " ╺━━┻╸"),
+    "2": ("╺━━━━┓", "     ┃", "     ┃", "┏━━━━┛", "┃     ", "┗━━━━╸"),
+    "3": ("╺━━━━┓", "     ┃", "     ┃", "  ╺━━┫", "     ┃", "╺━━━━┛"),
+    "4": ("╻    ╻", _V, _V, "┗━━━━┫", "     ┃", "     ╹"),
+    "5": ("┏━━━━╸", "┃     ", "┃     ", "┗━━━━┓", "     ┃", "╺━━━━┛"),
+    "6": ("┏━━━━╸", "┃     ", "┃     ", "┣━━━━┓", _V, "┗━━━━┛"),
+    "7": ("╺━━━━┓", "     ┃", "     ┃", "     ┃", "     ┃", "     ╹"),
+    "8": ("┏━━━━┓", _V, _V, "┣━━━━┫", _V, "┗━━━━┛"),
+    "9": ("┏━━━━┓", _V, _V, "┗━━━━┫", "     ┃", "╺━━━━┛"),
+    ".": ("  ", "  ", "  ", "  ", "  ", "▪ "),
+    "-": ("      ", "      ", "      ", "╺━━━━╸", "      ", "      "),
+    " ": ("  ",) * 6,
+}
+
+
+def render_big_digits(value: str) -> list[str]:
+    """Rend `value` en 6 lignes de traits fins (inconnus → '-')."""
+    glyphs = [_BIG_FONT.get(ch, _BIG_FONT["-"]) for ch in value.replace("—", "-")]
+    return [" ".join(g[r] for g in glyphs) for r in range(6)]
+
+
+class BigDigits(Static):
+    """Compteur numérique géant (≈2× le widget Digits de Textual)."""
+
+    def update(self, value: str = "") -> None:  # type: ignore[override]
+        rows = render_big_digits(value)
+        super().update(Text("\n".join(rows)))
+
+
+# Couleur de bordure par famille de modèle (Catppuccin Mocha)
+_FAMILY_COLORS = ("#89b4fa", "#cba6f7", "#fab387", "#94e2d5", "#f9e2af")
+
+
+def _model_family(name: str) -> str:
+    return name.split("-")[0]
+
+
+def _sidecar_line(sidecar: dict) -> str:
+    """Résumé d'une ligne du sidecar .json d'un modèle."""
+    if not sidecar:
+        return "[dim]└ pas de sidecar[/dim]"
+    parts = []
+    ctx = sidecar.get("ctx_size") or sidecar.get("ctx_train") or sidecar.get("context_size")
+    if ctx:
+        parts.append(f"ctx {int(ctx) // 1024}k")
+    if sidecar.get("spec_type"):
+        n = sidecar.get("spec_draft_n_max")
+        parts.append(f"MTP×{n}" if n and "mtp" in str(sidecar["spec_type"]).lower() else str(sidecar["spec_type"]))
+    if sidecar.get("mmproj"):
+        parts.append("👁 vision")
+    if sidecar.get("thinking"):
+        parts.append("🧠 thinking")
+    return "[dim]└ sidecar:[/dim] " + " · ".join(parts) if parts else "[dim]└ sidecar vide[/dim]"
+
+
+# ── Tête de robot (assets/robot.txt) : rendue en braille, yeux décalés vers la souris
+ROBOT_FILE = PROJECT_ROOT / "assets" / "robot.txt"
+_RB_BODY, _RB_EYE = "#89b4fa", "#a6e3a1"
+_ROBOT_TITLE = "LLAMA SERVER TUI"
+_TITLE_ROWS = 2   # repli si trop petit : ligne vide + titre sous le robot
+_TORSO_LINES = ("LLAMA SERVER", "TUI")
+_TORSO_CENTER = (35.5, 52.0)   # (ligne, col) source du centre de la zone vide du torse
+_TORSO_MIN_SCALE = 0.65
+_EYE_BOXES = ((13, 18, 33, 42), (13, 18, 57, 66))   # (r0, r1, c0, c1)
+_NOSE_BOX = (19, 22, 46, 54)
+_BRAILLE_BITS = {(0, 0): 1, (0, 1): 2, (0, 2): 4, (1, 0): 8, (1, 1): 16, (1, 2): 32, (0, 3): 64, (1, 3): 128}
+
+
+def _in_box(r: int, c: int, box: tuple) -> bool:
+    return box[0] <= r <= box[1] and box[2] <= c <= box[3]
+
+
+class RobotArt:
+    """Art ASCII ('@' = pixel) découpé en calques : corps, yeux mobiles ; la zone nez/bouche est ignorée."""
+
+    def __init__(self, text: str) -> None:
+        rows = text.rstrip("\n").split("\n")
+        self.h = len(rows)
+        self.w = max((len(r) for r in rows), default=0)
+        self.body: list[tuple[int, int]] = []
+        self.eyes: list[tuple[int, int]] = []
+        self.nose: list[tuple[int, int]] = []
+        for r, line in enumerate(rows):
+            for c, ch in enumerate(line):
+                if ch != "@":
+                    continue
+                if any(_in_box(r, c, b) for b in _EYE_BOXES):
+                    self.eyes.append((r, c))
+                elif _in_box(r, c, _NOSE_BOX):
+                    self.nose.append((r, c))
+                else:
+                    self.body.append((r, c))
+        self._cache: dict[tuple, Text] = {}
+
+    @staticmethod
+    def _dots(pixels, dr: int, dc: int, s: float) -> set[tuple[int, int]]:
+        """Projette les pixels (1 col × 2 unités de haut) sur une grille de points carrés à l'échelle s."""
+        acc: dict[tuple[int, int], float] = {}
+        for r, c in pixels:
+            x0, x1 = (c + dc) * s, (c + dc + 1) * s
+            y0, y1 = 2 * (r + dr) * s, 2 * (r + dr + 1) * s
+            for X in range(int(x0), int(x1) + 1):
+                wx = min(x1, X + 1) - max(x0, X)
+                if wx <= 0:
+                    continue
+                for Y in range(int(y0), int(y1) + 1):
+                    wy = min(y1, Y + 1) - max(y0, Y)
+                    if wy > 0:
+                        acc[(X, Y)] = acc.get((X, Y), 0.0) + wx * wy
+        return {k for k, v in acc.items() if v >= 0.35}
+
+    def fit(self, cols: int, rows: int) -> float:
+        """Échelle (points par colonne source) tenant dans cols×rows cellules braille ; 0 si trop petit."""
+        s = min(2 * cols / max(self.w, 1), 4 * rows / max(2 * self.h, 1))
+        return s if s >= 0.2 else 0.0
+
+    def render(self, cols: int, rows: int, x: float, y: float, blink: bool = False) -> Text:
+        s = self.fit(cols, rows)
+        on_torso = s >= _TORSO_MIN_SCALE
+        if not on_torso:
+            s = self.fit(cols, rows - _TITLE_ROWS)
+        if not s:
+            return Text("")
+        # parallaxe en 2 plans : corps (fond) < yeux (avant) ; la bouche n'est pas dessinée
+        bdx, bdy = round(x * 2), round(y * 0.8)
+        edx, edy = round(x * 5), round(y * 2)
+        key = (round(s, 3), on_torso, bdx, bdy, edx, edy, blink)
+        if key in self._cache:
+            return self._cache[key]
+        eyes = self.eyes
+        if blink:
+            eyes = [(r, c) for r, c in eyes if r in (15, 16)]
+        layers = (
+            (self._dots(self.body, bdy, bdx, s), _RB_BODY),
+            (self._dots(eyes, edy, edx, s), _RB_EYE),
+        )
+        W, H = round(self.w * s), round(2 * self.h * s)
+        ncols, nrows = (W + 1) // 2, (H + 3) // 4
+        bits = [[0] * ncols for _ in range(nrows)]
+        style = [[""] * ncols for _ in range(nrows)]
+        for dots, color in layers:                  # calques suivants = priorité (yeux > corps)
+            for X, Y in dots:
+                cx, cy = X // 2, Y // 4
+                if 0 <= cx < ncols and 0 <= cy < nrows:
+                    bits[cy][cx] |= _BRAILLE_BITS[(X % 2, Y % 4)]
+                    style[cy][cx] = color
+        overlay: dict[tuple[int, int], str] = {}
+        if on_torso:   # titre écrit sur le torse, suit le corps
+            mid_y = (_TORSO_CENTER[0] + bdy) * s / 2
+            mid_x = (_TORSO_CENTER[1] + bdx) * s / 2
+            for i, line in enumerate(_TORSO_LINES):
+                cy, x0 = int(mid_y - 0.5) + i, int(mid_x - len(line) / 2 + 0.5)
+                for j, ch in enumerate(line):
+                    overlay[(cy, x0 + j)] = ch
+        text = Text(no_wrap=True)
+        for cy in range(nrows):
+            for cx in range(ncols):
+                if (cy, cx) in overlay:
+                    text.append(overlay[(cy, cx)], style=f"bold {_RB_EYE}")
+                else:
+                    text.append(chr(0x2800 + bits[cy][cx]) if bits[cy][cx] else " ", style=style[cy][cx] or None)
+            text.append("\n" if (cy < nrows - 1 or not on_torso) else "")
+        if not on_torso:
+            text.append(" " * ncols + "\n")
+            text.append(_ROBOT_TITLE.center(ncols), style="bold #cdd6f4")
+        if len(self._cache) > 200:
+            self._cache.clear()
+        self._cache[key] = text
+        return text
+
+
+class RobotHead(Static):
+    """Robot dont le regard suit la souris (lissage + clignement)."""
+
+    def __init__(self, art_file: Path | None = None, **kwargs) -> None:
+        super().__init__("", **kwargs)
+        try:
+            self._art: RobotArt | None = RobotArt((art_file or ROBOT_FILE).read_text())
+        except OSError:
+            self._art = None
+        self._tx = self._ty = 0.0
+        self._x = self._y = 0.0
+        self._tick = 0
+        self._shown: tuple | None = None
+
+    def on_mount(self) -> None:
+        self.set_interval(0.05, self._step)
+
+    def look_at(self, screen_x: int, screen_y: int) -> None:
+        r = self.region
+        if not r.width:
+            return
+        cx, cy = r.x + r.width / 2, r.y + r.height / 2
+        self._tx = max(-1.0, min(1.0, (screen_x - cx) / 25))
+        self._ty = max(-1.0, min(1.0, (screen_y - cy) / 8))
+
+    def _step(self) -> None:
+        if self._art is None:
+            return
+        self._tick += 1
+        self._x += (self._tx - self._x) * 0.35
+        self._y += (self._ty - self._y) * 0.35
+        blink = (self._tick % 80) < 3
+        key = (self.size, round(self._x * 5), round(self._y * 2), round(self._y * 0.8), blink)
+        if key == self._shown:
+            return
+        self._shown = key
+        self.update(self._art.render(self.size.width, self.size.height, self._x, self._y, blink))
+
+
 class LlamaTUI(App):
     CSS = """
     Screen { layout: vertical; background: #1e1e2e; }
@@ -228,7 +443,7 @@ class LlamaTUI(App):
 
     /* ── Panneau modèles ── */
     #model-panel {
-        width: 38;
+        width: 48;
         background: #181825;
         border: round #45475a;
         padding: 1 1;
@@ -238,7 +453,9 @@ class LlamaTUI(App):
     #model-list { height: 1fr; }
     ListView { background: #181825; border: none; }
     ListItem { padding: 0 1; }
-    ListItem.active-model { color: #a6e3a1; text-style: bold; }
+    ListItem.family-header { background: #181825; color: #9399b2; text-style: bold; margin-top: 1; }
+    ListItem.model-card { margin-bottom: 1; border-left: thick #45475a; background: #1e1e2e; }
+    ListItem.active-model { color: #a6e3a1; text-style: bold; border-left: thick #a6e3a1; }
     ListItem:focus { background: #313244; }
     ListView:focus > ListItem.--highlight { background: #45475a; }
     .model-quant { color: #fab387; }
@@ -294,7 +511,7 @@ class LlamaTUI(App):
     .hint     { color: #9399b2; text-style: italic; }
 
     /* ── Panneau droit (onglets Stats/Slots/Logs) ── */
-    #right-tabs { height: 1fr; }
+    #right-tabs { width: 1fr; height: 1fr; }
 
     /* ── Stats enrichies ── */
     #stats-panel {
@@ -316,11 +533,15 @@ class LlamaTUI(App):
         color: #a6e3a1;
         background: #181825;
         width: auto;
+        height: 6;
+        margin-bottom: 1;
         text-style: bold;
     }
     #progress-ctx { color: #89b4fa; margin-top: 1; }
     #lbl-spark-tps { color: #89b4fa; text-style: bold; margin-top: 1; }
     #lbl-spark-cache { color: #a6e3a1; text-style: bold; margin-top: 1; }
+    #tab-stats { height: 1fr; }
+    #robot { height: 1fr; width: 100%; content-align: center middle; }
     #tab-slots { padding: 0 1; }
     #lbl-slots { color: #cdd6f4; }
     """
@@ -414,13 +635,14 @@ class LlamaTUI(App):
                 with TabPane("Stats", id="tab-stats"):
                     with Vertical(id="stats-panel"):
                         yield Static("▪ Performance", classes="section")
-                        yield Digits("  —", id="digits-tps")
+                        yield BigDigits("  —", id="digits-tps")
                         yield Label("", id="lbl-tps-secondary")
                         yield Static("⚡ tokens/s", classes="section", id="lbl-spark-tps")
                         yield Sparkline([], id="sparkline-tps", summary_function=max)
                         yield Static("Cache %", classes="section", id="lbl-spark-cache")
                         yield Sparkline([], id="sparkline-cache", summary_function=max)
                         yield ProgressBar(total=100.0, show_eta=False, id="progress-ctx")
+                    yield RobotHead(id="robot")
                 with TabPane("Slots", id="tab-slots"):
                     yield Static("▪ Slots", classes="section")
                     yield Static("─" * 40, classes="divider")
@@ -439,6 +661,12 @@ class LlamaTUI(App):
             yield Button("✕ Logs [c]",   id="btn-clear")
             yield Button("🌐 WebUI [d]", id="btn-activity", variant="warning")
         yield Footer()
+
+    def on_mouse_move(self, event) -> None:
+        try:
+            self.query_one("#robot", RobotHead).look_at(event.screen_x, event.screen_y)
+        except Exception:
+            pass
 
     # ── Lifecycle ─────────────────────────────────────────────────────────
 
@@ -477,26 +705,49 @@ class LlamaTUI(App):
         lv.clear()
         active = self._model_mgr.active_model
         models = self._model_mgr.scan()
+        # Groupes par famille (ordre de 1re apparition : famille active d'abord)
+        families: dict[str, list] = {}
         for info in models:
-            is_active = info.path == active
-            size_str = f"{info.size_gb:.1f}GB" if info.size_gb >= 0.1 else f"{info.size_gb*1024:.0f}MB"
-            quant = f"  [bold yellow]{info.quant}[/bold yellow]" if info.quant else ""
-            ctx = f"  [dim]ctx {info.ctx_train}[/dim]" if info.ctx_train else ""
-            prefix = "● " if is_active else "  "
-            item = ListItem(Label(f"{prefix}{info.name}{quant}\n  [{size_str}]  [dim]{info.mtime_date}[/dim]{ctx}"))
-            if is_active:
-                item.add_class("active-model")
-            lv.append(item)
+            families.setdefault(_model_family(info.name), []).append(info)
+        self._list_paths: list[Path | None] = []
+        active_idx = None
+        for fi, (family, infos) in enumerate(families.items()):
+            color = _FAMILY_COLORS[fi % len(_FAMILY_COLORS)]
+            header = ListItem(Label(f"[bold {color}]━━ {family} ━━[/]"), disabled=True)
+            header.add_class("family-header")
+            lv.append(header)
+            self._list_paths.append(None)
+            for info in infos:
+                is_active = info.path == active
+                size_str = f"{info.size_gb:.1f}GB" if info.size_gb >= 0.1 else f"{info.size_gb*1024:.0f}MB"
+                quant = f"  [bold yellow]{info.quant}[/bold yellow]" if info.quant else ""
+                prefix = "● " if is_active else "  "
+                item = ListItem(Label(
+                    f"{prefix}{info.name}{quant}\n"
+                    f"  [{size_str}]  [dim]{info.mtime_date}[/dim]\n"
+                    f"  {_sidecar_line(info.sidecar)}"
+                ))
+                item.add_class("model-card")
+                if is_active:
+                    item.add_class("active-model")
+                    active_idx = len(self._list_paths)
+                else:
+                    item.styles.border_left = ("thick", color)
+                lv.append(item)
+                self._list_paths.append(info.path)
         if not models:
             lv.append(ListItem(Label("  Aucun modèle trouvé")))
+            self._list_paths.append(None)
+        elif active_idx is not None:
+            lv.index = active_idx
 
     def _selected_model_path(self) -> Path | None:
-        lv      = self.query_one("#model-list", ListView)
-        idx     = lv.index
-        models  = self._model_mgr.scan()
-        if idx is None or idx >= len(models):
+        lv  = self.query_one("#model-list", ListView)
+        idx = lv.index
+        paths = getattr(self, "_list_paths", [])
+        if idx is None or idx >= len(paths):
             return None
-        return models[idx].path
+        return paths[idx]
 
     # ── UI refresh ────────────────────────────────────────────────────────
 
@@ -585,8 +836,8 @@ class LlamaTUI(App):
             tps_val = history[-1]
         else:
             tps_val = None
-        digits = self.query_one("#digits-tps", Digits)
-        digits.update(f"{tps_val:.1f}" if tps_val else " —")
+        digits = self.query_one("#digits-tps", BigDigits)
+        digits.update(f"{tps_val:.1f}" if tps_val else "—")
 
         avg = f"{s.avg_tps:.1f}" if s.avg_tps else "—"
         peak = f"{s.peak_tps:.1f}" if s.peak_tps else "—"

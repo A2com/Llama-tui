@@ -274,3 +274,17 @@ def test_load_sidecar_overrides_win_after_purge(manager, models_dir, config_file
     saved = json.loads(config_file.read_text())
     assert saved["ctx_size"] == 262144
     assert saved["mmproj"] == "models/m.gguf"
+
+
+def test_scan_excludes_mmproj(models_dir, config_file):
+    (models_dir / "mmproj-F16.gguf").write_bytes(b"x" * 512)
+    mgr = ModelManager(models_dir=models_dir, config_file=config_file)
+    assert "mmproj-F16" not in {m.name for m in mgr.scan()}
+
+
+def test_scan_exposes_sidecar(models_dir, config_file):
+    (models_dir / "alpha.json").write_text(json.dumps({"ctx_size": 4096, "thinking": True}))
+    mgr = ModelManager(models_dir=models_dir, config_file=config_file)
+    models = {m.name: m for m in mgr.scan()}
+    assert models["alpha"].sidecar == {"ctx_size": 4096, "thinking": True}
+    assert models["beta"].sidecar == {}

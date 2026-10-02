@@ -427,7 +427,7 @@ def test_stats_has_digits_tps():
     import inspect
     compose_src = inspect.getsource(LlamaTUI.compose)
     assert 'id="digits-tps"' in compose_src, "Digits tps manquant"
-    assert "Digits" in compose_src
+    assert "BigDigits" in compose_src
 
 
 def test_stats_has_ctx_progressbar():
@@ -451,3 +451,41 @@ def test_stats_sparkline_style_upgraded():
 def LlamaTUI_CSS():
     from src.tui import LlamaTUI
     return LlamaTUI.CSS
+
+
+def test_render_big_digits_height_and_unknown():
+    from src.tui import render_big_digits
+    rows = render_big_digits("12.5")
+    assert len(rows) == 6 and "█" not in "".join(rows)
+    assert len({len(r) for r in rows}) == 1
+    assert render_big_digits("—") == render_big_digits("-")
+
+
+def test_sidecar_line_summary():
+    from src.tui import _sidecar_line
+    line = _sidecar_line({"ctx_size": 262144, "spec_type": "draft-mtp", "spec_draft_n_max": 1,
+                          "mmproj": "m.gguf", "thinking": True})
+    assert "ctx 256k" in line and "MTP×1" in line and "vision" in line and "thinking" in line
+    assert "pas de sidecar" in _sidecar_line({})
+
+
+def test_robot_art_layers_and_render():
+    from src.tui import RobotArt, ROBOT_FILE
+    art = RobotArt(ROBOT_FILE.read_text())
+    assert (art.w, art.h) == (100, 57)
+    assert len(art.eyes) == 102 and len(art.nose) == 31
+    centre = art.render(40, 19, 0, 0).plain
+    right = art.render(40, 19, 1, 0).plain
+    assert centre != right
+    assert art.render(40, 19, 0, 0, blink=True).plain != centre
+    assert art.render(3, 2, 0, 0).plain == ""          # trop petit → masqué
+    lines = centre.split("\n")
+    assert len({len(l) for l in lines}) == 1 and len(lines) <= 19
+
+
+def test_robot_body_follows_mouse():
+    from src.tui import RobotArt, ROBOT_FILE, _RB_BODY
+    art = RobotArt(ROBOT_FILE.read_text())
+    s = art.fit(60, 40)
+    assert art._dots(art.body, 0, 2, s) != art._dots(art.body, 0, 0, s)
+    assert art.render(60, 40, 1, 0).plain != art.render(60, 40, 0, 0).plain
