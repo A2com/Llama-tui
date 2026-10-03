@@ -477,7 +477,9 @@ def test_robot_art_layers_and_render():
     centre = art.render(40, 19, 0, 0).plain
     right = art.render(40, 19, 1, 0).plain
     assert centre != right
-    assert art.render(40, 19, 0, 0, blink=True).plain != centre
+    assert art.render(40, 19, 0, 0, squint=2).plain != centre
+    assert art.render(40, 19, 0, 0, squint=1).plain not in (centre, art.render(40, 19, 0, 0, squint=2).plain)
+    assert "LLAMA" not in centre and "TUI" not in centre
     assert art.render(3, 2, 0, 0).plain == ""          # trop petit → masqué
     lines = centre.split("\n")
     assert len({len(l) for l in lines}) == 1 and len(lines) <= 19
@@ -489,3 +491,32 @@ def test_robot_body_follows_mouse():
     s = art.fit(60, 40)
     assert art._dots(art.body, 0, 2, s) != art._dots(art.body, 0, 0, s)
     assert art.render(60, 40, 1, 0).plain != art.render(60, 40, 0, 0).plain
+
+
+def test_robot_is_half_size():
+    from src.tui import RobotArt, ROBOT_FILE
+    art = RobotArt(ROBOT_FILE.read_text())
+    s = art.fit(60, 40)
+    width = len(art.render(60, 40, 0, 0).plain.split("\n")[0])
+    assert abs(width - round(art.w * s * 0.5 + 1) // 2) <= 1
+
+
+def test_robot_animation_schedule_is_spaced_and_varied():
+    import random
+    from src.tui import RobotHead, _ANIM_GAP
+    head = RobotHead(rng=random.Random(7))
+    head._art = object()   # pas de rendu
+    head.update = lambda *a, **k: None
+    seen, starts = [], []
+    for _ in range(20 * 600):   # 10 min
+        head._tick += 1
+        if head._anim is None and head._tick >= head._next_at:
+            head._pick_anim()
+            seen.append(head._anim[0])
+            starts.append(head._tick)
+        head._pose()
+    assert len(seen) >= 30
+    assert all(a != b for a, b in zip(seen, seen[1:]))        # jamais 2× la même
+    assert len(set(seen)) >= 5                               # variété
+    gaps = [b - a for a, b in zip(starts, starts[1:])]
+    assert min(gaps) >= _ANIM_GAP[0] * 20                    # espacées

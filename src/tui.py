@@ -1,7 +1,9 @@
 """TUI de gestion llama-server + litellm proxy avec sélection de modèles."""
 
 import json
+import math
 import os
+import random
 import socket
 import subprocess
 import threading
@@ -269,11 +271,8 @@ def _sidecar_line(sidecar: dict) -> str:
 # ── Tête de robot (assets/robot.txt) : rendue en braille, yeux décalés vers la souris
 ROBOT_FILE = PROJECT_ROOT / "assets" / "robot.txt"
 _RB_BODY, _RB_EYE = "#89b4fa", "#a6e3a1"
-_ROBOT_TITLE = "LLAMA SERVER TUI"
-_TITLE_ROWS = 2   # repli si trop petit : ligne vide + titre sous le robot
-_TORSO_LINES = ("LLAMA SERVER", "TUI")
-_TORSO_CENTER = (35.5, 52.0)   # (ligne, col) source du centre de la zone vide du torse
-_TORSO_MIN_SCALE = 0.65
+_ROBOT_SCALE = 0.5   # le robot occupe la moitié de la place disponible
+_EYE_ROWS = {0: None, 1: (14, 15, 16, 17), 2: (15, 16)}   # squint → rangées d'yeux gardées (None = toutes)
 _EYE_BOXES = ((13, 18, 33, 42), (13, 18, 57, 66))   # (r0, r1, c0, c1)
 _NOSE_BOX = (19, 22, 46, 54)
 _BRAILLE_BITS = {(0, 0): 1, (0, 1): 2, (0, 2): 4, (1, 0): 8, (1, 1): 16, (1, 2): 32, (0, 3): 64, (1, 3): 128}
@@ -327,22 +326,20 @@ class RobotArt:
         s = min(2 * cols / max(self.w, 1), 4 * rows / max(2 * self.h, 1))
         return s if s >= 0.2 else 0.0
 
-    def render(self, cols: int, rows: int, x: float, y: float, blink: bool = False) -> Text:
-        s = self.fit(cols, rows)
-        on_torso = s >= _TORSO_MIN_SCALE
-        if not on_torso:
-            s = self.fit(cols, rows - _TITLE_ROWS)
+    def render(self, cols: int, rows: int, x: float, y: float, squint: int = 0) -> Text:
+        s = self.fit(cols, rows) * _ROBOT_SCALE
         if not s:
             return Text("")
         # parallaxe en 2 plans : corps (fond) < yeux (avant) ; la bouche n'est pas dessinée
         bdx, bdy = round(x * 2), round(y * 0.8)
         edx, edy = round(x * 5), round(y * 2)
-        key = (round(s, 3), on_torso, bdx, bdy, edx, edy, blink)
+        key = (round(s, 3), bdx, bdy, edx, edy, squint)
         if key in self._cache:
             return self._cache[key]
         eyes = self.eyes
-        if blink:
-            eyes = [(r, c) for r, c in eyes if r in (15, 16)]
+        keep = _EYE_ROWS[squint]
+        if keep is not None:
+            eyes = [(r, c) for r, c in eyes if r in keep]
         layers = (
             (self._dots(self.body, bdy, bdx, s), _RB_BODY),
             (self._dots(eyes, edy, edx, s), _RB_EYE),
@@ -357,47 +354,88 @@ class RobotArt:
                 if 0 <= cx < ncols and 0 <= cy < nrows:
                     bits[cy][cx] |= _BRAILLE_BITS[(X % 2, Y % 4)]
                     style[cy][cx] = color
-        overlay: dict[tuple[int, int], str] = {}
-        if on_torso:   # titre écrit sur le torse, suit le corps
-            mid_y = (_TORSO_CENTER[0] + bdy) * s / 2
-            mid_x = (_TORSO_CENTER[1] + bdx) * s / 2
-            for i, line in enumerate(_TORSO_LINES):
-                cy, x0 = int(mid_y - 0.5) + i, int(mid_x - len(line) / 2 + 0.5)
-                for j, ch in enumerate(line):
-                    overlay[(cy, x0 + j)] = ch
         text = Text(no_wrap=True)
         for cy in range(nrows):
             for cx in range(ncols):
-                if (cy, cx) in overlay:
-                    text.append(overlay[(cy, cx)], style=f"bold {_RB_EYE}")
-                else:
-                    text.append(chr(0x2800 + bits[cy][cx]) if bits[cy][cx] else " ", style=style[cy][cx] or None)
-            text.append("\n" if (cy < nrows - 1 or not on_torso) else "")
-        if not on_torso:
-            text.append(" " * ncols + "\n")
-            text.append(_ROBOT_TITLE.center(ncols), style="bold #cdd6f4")
+                text.append(chr(0x2800 + bits[cy][cx]) if bits[cy][cx] else " ", style=style[cy][cx] or None)
+            if cy < nrows - 1:
+                text.append("\n")
         if len(self._cache) > 200:
             self._cache.clear()
         self._cache[key] = text
         return text
 
 
-class RobotHead(Static):
-    """Robot dont le regard suit la souris (lissage + clignement)."""
+# Animations d'humeur : (nom, poids, durée en ticks de 50 ms). Tirées au hasard, espacées, jamais 2× la même.
+_ROBOT_ANIMS = (
+    ("blink", 5, 3),
+    ("double_blink", 2, 9),
+    ("squint", 2, 8),
+    ("nod", 2, 22),
+    ("shake", 1, 22),
+    ("breathe", 3, 40),
+    ("wander", 3, 1),
+)
+_ANIM_GAP = (4.0, 11.0)   # secondes entre deux animations
 
-    def __init__(self, art_file: Path | None = None, **kwargs) -> None:
+
+class RobotHead(Static):
+    """Robot dont le regard suit la souris, avec animations aléatoires espacées (clignement, hochement…)."""
+
+    def __init__(self, art_file: Path | None = None, rng: random.Random | None = None, **kwargs) -> None:
         super().__init__("", **kwargs)
         try:
             self._art: RobotArt | None = RobotArt((art_file or ROBOT_FILE).read_text())
         except OSError:
             self._art = None
+        self._rng = rng or random.Random()
         self._tx = self._ty = 0.0
         self._x = self._y = 0.0
         self._tick = 0
+        self._idle = 0                       # ticks depuis le dernier mouvement de souris
+        self._anim: tuple[str, int, int] | None = None   # (nom, tick de départ, durée)
+        self._last_anim = ""
+        self._next_at = self._draw_gap()
         self._shown: tuple | None = None
 
     def on_mount(self) -> None:
         self.set_interval(0.05, self._step)
+
+    def _draw_gap(self) -> int:
+        return self._tick + round(self._rng.uniform(*_ANIM_GAP) * 20)
+
+    def _pick_anim(self) -> None:
+        choices = [a for a in _ROBOT_ANIMS if a[0] != self._last_anim]
+        name, _, dur = self._rng.choices(choices, weights=[a[1] for a in choices])[0]
+        self._last_anim = name
+        self._anim = (name, self._tick, dur)
+        if name == "wander" and self._idle > 100:   # regard qui vagabonde si la souris est immobile
+            self._tx, self._ty = self._rng.uniform(-0.8, 0.8), self._rng.uniform(-0.6, 0.6)
+
+    def _pose(self) -> tuple[float, float, int]:
+        """(décalage x, décalage y, squint) de l'animation en cours."""
+        if self._anim is None:
+            return 0.0, 0.0, 0
+        name, start, dur = self._anim
+        t = self._tick - start
+        if t >= dur:
+            self._anim = None
+            self._next_at = self._draw_gap()
+            return 0.0, 0.0, 0
+        k = t / dur
+        if name == "blink":
+            return 0.0, 0.0, 2
+        if name == "double_blink":
+            return 0.0, 0.0, 2 if t % 6 < 2 else 0
+        if name == "squint":
+            return 0.0, 0.0, 1
+        if name == "nod":
+            return 0.0, 0.8 * math.sin(k * 2 * math.pi * 2), 0
+        if name == "shake":
+            return 0.6 * math.sin(k * 2 * math.pi * 2), 0.0, 0
+        if name == "breathe":
+            return 0.0, 0.3 * math.sin(k * 2 * math.pi), 0
+        return 0.0, 0.0, 0
 
     def look_at(self, screen_x: int, screen_y: int) -> None:
         r = self.region
@@ -406,19 +444,24 @@ class RobotHead(Static):
         cx, cy = r.x + r.width / 2, r.y + r.height / 2
         self._tx = max(-1.0, min(1.0, (screen_x - cx) / 25))
         self._ty = max(-1.0, min(1.0, (screen_y - cy) / 8))
+        self._idle = 0
 
     def _step(self) -> None:
         if self._art is None:
             return
         self._tick += 1
+        self._idle += 1
+        if self._anim is None and self._tick >= self._next_at:
+            self._pick_anim()
         self._x += (self._tx - self._x) * 0.35
         self._y += (self._ty - self._y) * 0.35
-        blink = (self._tick % 80) < 3
-        key = (self.size, round(self._x * 5), round(self._y * 2), round(self._y * 0.8), blink)
+        ax, ay, squint = self._pose()
+        x, y = self._x + ax, self._y + ay
+        key = (self.size, round(x * 5), round(x * 2), round(y * 2), round(y * 0.8), squint)
         if key == self._shown:
             return
         self._shown = key
-        self.update(self._art.render(self.size.width, self.size.height, self._x, self._y, blink))
+        self.update(self._art.render(self.size.width, self.size.height, x, y, squint))
 
 
 class LlamaTUI(App):
