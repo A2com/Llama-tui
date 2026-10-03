@@ -231,3 +231,47 @@ def test_server_bin_env_overrides_config(tmp_path, monkeypatch):
         RuntimeError(f"CMD:{cmd[0]}")))
     with pytest.raises(RuntimeError, match=r"CMD:/env/path/llama-server"):
         mgr.start()
+
+
+# ── pidfile périmé / PID recyclé ───────────────────────────────────────────
+
+def test_status_stopped_when_pid_not_permitted(manager, monkeypatch):
+    manager.pid_file.write_text("3655")
+
+    def deny(pid, sig):
+        raise PermissionError(1, "Operation not permitted")
+
+    monkeypatch.setattr("src.server_manager.os.kill", deny)
+    assert manager.status() == ServerStatus.STOPPED
+    assert not manager.pid_file.exists()
+
+
+def test_status_stopped_when_pid_is_other_command(manager, monkeypatch):
+    manager.pid_file.write_text("3655")
+    monkeypatch.setattr("src.server_manager.os.kill", lambda pid, sig: None)
+    monkeypatch.setattr(
+        "src.server_manager.subprocess.check_output", lambda *a, **k: b"/usr/bin/other\n"
+    )
+    assert manager.status() == ServerStatus.STOPPED
+    assert not manager.pid_file.exists()
+
+
+def test_status_running_when_pidfile_points_to_llama_server(manager, monkeypatch):
+    manager.pid_file.write_text("3655")
+    monkeypatch.setattr("src.server_manager.os.kill", lambda pid, sig: None)
+    monkeypatch.setattr(
+        "src.server_manager.subprocess.check_output", lambda *a, **k: b"/opt/homebrew/bin/llama-server\n"
+    )
+    assert manager.status() == ServerStatus.RUNNING
+
+
+def test_stop_does_not_signal_recycled_pid(manager, monkeypatch):
+    manager.pid_file.write_text("3655")
+    calls = []
+    monkeypatch.setattr("src.server_manager.os.kill", lambda pid, sig: calls.append((pid, sig)))
+    monkeypatch.setattr(
+        "src.server_manager.subprocess.check_output", lambda *a, **k: b"/usr/bin/other\n"
+    )
+    manager.stop()
+    assert [c for c in calls if c[1] != 0] == []
+    assert not manager.pid_file.exists()

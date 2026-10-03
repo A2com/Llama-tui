@@ -41,6 +41,18 @@ class ServerManager:
         except Exception:
             return None
 
+    def _pid_is_ours(self, pid: int) -> bool:
+        """True si pid est un llama-server vivant (pas un PID recyclé par un autre process)."""
+        try:
+            os.kill(pid, 0)
+            comm = subprocess.check_output(
+                ["ps", "-p", str(pid), "-o", "comm="],
+                stderr=subprocess.DEVNULL,
+            ).decode().strip()
+        except Exception:  # ProcessLookupError, PermissionError, ps en échec
+            return False
+        return "llama-server" in comm or Path(comm).name == Path(getattr(self._config, "server_bin", None) or "llama-server").name
+
     # ── Status ─────────────────────────────────────────────────────────────
 
     def status(self) -> ServerStatus:
@@ -51,10 +63,11 @@ class ServerManager:
         if self.pid_file.exists():
             try:
                 pid = int(self.pid_file.read_text().strip())
-                os.kill(pid, 0)          # vérifie si le PID existe
+            except ValueError:
+                pid = None
+            if pid is not None and self._pid_is_ours(pid):
                 return ServerStatus.RUNNING
-            except (ProcessLookupError, ValueError):
-                self.pid_file.unlink(missing_ok=True)
+            self.pid_file.unlink(missing_ok=True)  # pidfile périmé
         # Détection par port (llama-server lancé manuellement)
         if self._port_in_use():
             return ServerStatus.RUNNING
@@ -95,7 +108,8 @@ class ServerManager:
         if self.pid_file.exists():
             try:
                 pid = int(self.pid_file.read_text().strip())
-                os.kill(pid, signal.SIGTERM)
+                if self._pid_is_ours(pid):
+                    os.kill(pid, signal.SIGTERM)
             except Exception:
                 pass
             self.pid_file.unlink(missing_ok=True)
