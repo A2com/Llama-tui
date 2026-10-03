@@ -376,7 +376,7 @@ _ROBOT_ANIMS = (
     ("breathe", 3, 40),
     ("wander", 3, 1),
 )
-_ANIM_GAP = (4.0, 11.0)   # secondes entre deux animations
+_ANIM_GAP = (1.5, 5.0)   # secondes entre deux animations
 
 
 class RobotHead(Static):
